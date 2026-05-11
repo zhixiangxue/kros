@@ -1,205 +1,309 @@
-"""`kros browse` — headless browser for LLM agents. Backed by Lightpanda + CDP.
+"""``kros browse`` — agent-first headless browser CLI.
 
-The subcommand tree:
+Fourteen atomic commands, grouped by tier:
 
-- ``kros browse get <url>``           — LLM-ready Markdown (fast path, no CDP)
-- ``kros browse get <url> --selector`` / ``--eval``  — DOM query over CDP
-- ``kros browse interact <url> --script <file.py>``  — run a Python script
-  with live ``browser``, ``context``, ``page`` globals (raw Playwright sync API)
-- ``kros browse serve``               — foreground CDP server (shareable)
-- ``kros browse info``                — inspect active driver + endpoint
+**Tier 1 — core (6)**
+    open / read / click / fill / close / info
+
+**Tier 2 — high-value (4)**
+    find / wait / scroll / eval
+
+**Tier 3 — completion (4)**
+    press / hover / select / check
+
+The CLI is entirely driver-neutral: every command resolves a driver via
+:func:`kros.commands.browse.drivers.get_driver`, calls the matching
+method on it, and formats the return value. Whether the driver spawns a
+daemon, connects to a remote CDP endpoint, or talks to a cloud API is
+the driver's private business.
 """
 
 from __future__ import annotations
 
-import os
-import runpy
 import sys
-from pathlib import Path
-from typing import Optional
+from contextlib import contextmanager
+from typing import Any, Iterator, Optional
 
 import typer
 
-from .driver import get_driver, get_endpoint
-from .session import browse_session
+from kros.commands.browse import formatting
+from kros.commands.browse.contract import (
+    BrowseDriver,
+    DriverError,
+    NoSessionError,
+    SessionExistsError,
+)
+from kros.commands.browse.drivers import get_driver
 
 
 browse_app = typer.Typer(
-    help="Headless browser for LLM agents. Backed by Lightpanda + CDP.",
+    help="Agent-first headless browser. One session, 14 atomic ops.",
     no_args_is_help=True,
     add_completion=False,
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 
 
-@browse_app.command("get")
-def get_cmd(
-    url: str = typer.Argument(..., help="URL to fetch."),
+# Exit codes — stable so agents can branch on them.
+EXIT_OK = 0
+EXIT_GENERIC = 1
+EXIT_NO_SESSION = 2
+EXIT_SESSION_EXISTS = 3
+EXIT_BAD_INPUT = 4
+
+
+@contextmanager
+def _handle_errors() -> Iterator[None]:
+    """Translate driver errors into sensible stderr + exit codes."""
+    try:
+        yield
+    except NoSessionError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=EXIT_NO_SESSION)
+    except SessionExistsError as e:
+        typer.secho(f"SessionExists: {e}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=EXIT_SESSION_EXISTS)
+    except DriverError as e:
+        typer.secho(f"{type(e).__name__}: {e}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=EXIT_GENERIC)
+    except (OSError, TimeoutError) as e:
+        typer.secho(f"{type(e).__name__}: {e}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=EXIT_GENERIC)
+
+
+def _driver() -> BrowseDriver:
+    return get_driver()
+
+
+def _echo(s: str) -> None:
+    sys.stdout.write(s.rstrip() + "\n")
+
+
+def _dump(obj: Any) -> dict:
+    """Pydantic v2 ``model_dump``; fall back to dict() if already plain."""
+    dump = getattr(obj, "model_dump", None)
+    return dump() if callable(dump) else dict(obj)
+
+
+# ---------------------------------------------------------------------------
+# Tier 1 — core
+# ---------------------------------------------------------------------------
+
+
+@browse_app.command("open")
+def open_cmd(
+    url: str = typer.Argument(..., help="URL to open in the new session."),
+    timeout: float = typer.Option(
+        30.0,
+        "--timeout",
+        "-t",
+        help="Max seconds to wait for the initial goto to complete.",
+    ),
+) -> None:
+    """Start a new browse session and navigate to ``url``.
+
+    Fails with ``SessionExists`` (exit 3) if a session is already live —
+    call ``kros browse close`` first.
+    """
+    with _handle_errors():
+        _driver().open(url, timeout_ms=int(timeout * 1000))
+        _echo(formatting.format_session_info(_dump(_driver().info())))
+
+
+@browse_app.command("read")
+def read_cmd(
     selector: Optional[str] = typer.Option(
         None,
         "--selector",
         "-s",
-        help="CSS selector; print the matching element's inner_text instead of the full page markdown.",
+        help="Scope the snapshot to the subtree matched by this CSS selector. "
+        "(V1: not yet implemented — run without --selector for now.)",
     ),
-    eval_js: Optional[str] = typer.Option(
+) -> None:
+    """Snapshot the current page: URL, title, markdown, and ref'd elements."""
+    with _handle_errors():
+        result = _driver().read(selector=selector)
+        _echo(formatting.format_read_result(_dump(result)))
+
+
+@browse_app.command("click")
+def click_cmd(
+    ref: int = typer.Option(..., "--ref", help="Element ref (from `read` or `find`)."),
+) -> None:
+    """Click the element identified by ``--ref``."""
+    with _handle_errors():
+        state = _driver().click(ref=ref)
+        _echo(formatting.format_page_state(_dump(state)))
+
+
+@browse_app.command("fill")
+def fill_cmd(
+    ref: int = typer.Option(..., "--ref", help="Element ref of the input field."),
+    value: str = typer.Option(..., "--value", help="Text to write into the field."),
+) -> None:
+    """Type ``--value`` into the input/textarea identified by ``--ref``."""
+    with _handle_errors():
+        state = _driver().fill(ref=ref, value=value)
+        _echo(formatting.format_page_state(_dump(state)))
+
+
+@browse_app.command("close")
+def close_cmd() -> None:
+    """Close the current session.
+
+    Idempotent: doing this when no session exists is a silent no-op.
+    """
+    with _handle_errors():
+        _driver().close()
+        _echo("closed.")
+
+
+@browse_app.command("info")
+def info_cmd() -> None:
+    """Show the current session's state (or 'no session' if none)."""
+    with _handle_errors():
+        info = _driver().info()
+        _echo(formatting.format_session_info(_dump(info)))
+
+
+# ---------------------------------------------------------------------------
+# Tier 2 — high-value
+# ---------------------------------------------------------------------------
+
+
+@browse_app.command("find")
+def find_cmd(
+    role: Optional[str] = typer.Option(
+        None, "--role", help="ARIA role to match (button, link, textbox, ...)."
+    ),
+    name: Optional[str] = typer.Option(
         None,
-        "--eval",
-        help="JavaScript expression to evaluate on the page; print the return value.",
-    ),
-    wait_until: str = typer.Option(
-        "domcontentloaded",
-        "--wait-until",
-        help="Page load state to wait for: load, domcontentloaded, networkidle.",
-    ),
-    timeout: float = typer.Option(
-        30.0, "--timeout", "-t", help="Overall timeout in seconds."
+        "--name",
+        help="Substring of the element's accessible name (case-insensitive).",
     ),
 ) -> None:
-    """Fetch a URL.
+    """Locate elements by ARIA role and/or accessible name.
 
-    Default path: return LLM-ready Markdown via ``lightpanda fetch --dump markdown``
-    (no CDP, no server, minimum latency).
-
-    With ``--selector`` or ``--eval``: take the CDP path so we can query the
-    live DOM / evaluate JS against the loaded page.
+    At least one of ``--role`` / ``--name`` is required.
     """
-    driver = get_driver()
-
-    # Fast path: plain dump, no DOM query → skip CDP entirely.
-    if selector is None and eval_js is None:
-        try:
-            md = driver.fetch_markdown(url, timeout=timeout)
-        except FileNotFoundError as e:
-            typer.secho(str(e), fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=127)
-        except Exception as e:
-            typer.secho(f"{type(e).__name__}: {e}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=1)
-        sys.stdout.write(md)
-        if md and not md.endswith("\n"):
-            sys.stdout.write("\n")
-        return
-
-    # DOM path: connect (or spawn+connect) over CDP, run one query, exit.
-    try:
-        with browse_session(driver=driver) as (_browser, _ctx, page):
-            page.goto(url, wait_until=wait_until, timeout=timeout * 1000)
-            if selector is not None:
-                text = page.locator(selector).first.inner_text()
-                sys.stdout.write(text)
-                if not text.endswith("\n"):
-                    sys.stdout.write("\n")
-            elif eval_js is not None:
-                val = page.evaluate(eval_js)
-                sys.stdout.write(f"{val}\n")
-    except FileNotFoundError as e:
-        typer.secho(str(e), fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=127)
-    except Exception as e:
-        typer.secho(f"{type(e).__name__}: {e}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
+    if role is None and name is None:
+        typer.secho(
+            "find needs at least --role or --name (use `read` for the full list)",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_BAD_INPUT)
+    with _handle_errors():
+        result = _driver().find(role=role, name=name)
+        _echo(formatting.format_find_result(_dump(result)))
 
 
-@browse_app.command()
-def interact(
-    url: str = typer.Argument(..., help="URL to open before running the script."),
-    script: Path = typer.Option(
-        ...,
-        "--script",
-        help="Path to a Python file. It runs with live `browser`, `context`, `page` globals (raw Playwright sync API).",
+@browse_app.command("wait")
+def wait_cmd(
+    selector: str = typer.Option(
+        ..., "--selector", "-s", help="CSS selector to wait for."
     ),
-    wait_until: str = typer.Option(
-        "domcontentloaded",
-        "--wait-until",
-        help="Page load state to wait for before handing control to the script.",
-    ),
-    timeout: float = typer.Option(
-        60.0, "--timeout", "-t", help="Initial page load timeout in seconds."
+    timeout_ms: int = typer.Option(
+        5000, "--timeout-ms", help="Max milliseconds to wait."
     ),
 ) -> None:
-    """Open a URL, then run a user Python script against the live page.
+    """Block until an element matching ``--selector`` is in the DOM.
 
-    The script sees three globals — ``browser``, ``context``, ``page`` — from
-    the raw Playwright sync API. Example script::
-
-        page.fill('input[name=q]', 'kros')
-        page.click('button[type=submit]')
-        print(page.locator('h1').inner_text())
+    Prints ``ref=<int>`` on success (agents can pipe into ``click --ref``).
     """
-    if not script.exists():
-        typer.secho(f"Script not found: {script}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=2)
-
-    try:
-        with browse_session() as (browser, ctx, page):
-            page.goto(url, wait_until=wait_until, timeout=timeout * 1000)
-            init_globals = {
-                "browser": browser,
-                "context": ctx,
-                "page": page,
-                "__file__": str(script),
-            }
-            runpy.run_path(
-                str(script),
-                init_globals=init_globals,
-                run_name="__kros_browse_script__",
-            )
-    except FileNotFoundError as e:
-        typer.secho(str(e), fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=127)
-    except Exception as e:
-        typer.secho(f"{type(e).__name__}: {e}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
+    with _handle_errors():
+        ref = _driver().wait(selector=selector, timeout_ms=timeout_ms)
+        _echo(f"ref={ref}")
 
 
-@browse_app.command()
-def serve(
-    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind."),
-    port: int = typer.Option(9222, "--port", help="Port to bind."),
+@browse_app.command("scroll")
+def scroll_cmd(
+    ref: Optional[int] = typer.Option(
+        None, "--ref", help="Scroll this element into view."
+    ),
+    x: Optional[int] = typer.Option(None, "--x", help="Scroll the page by x pixels."),
+    y: Optional[int] = typer.Option(None, "--y", help="Scroll the page by y pixels."),
 ) -> None:
-    """Run the driver's CDP server in the foreground. Ctrl+C to stop.
-
-    Useful for sharing one long-lived browser across multiple tools, or for
-    external Playwright / Puppeteer / chromedp clients.
-    """
-    driver = get_driver()
-    try:
-        bin_path = driver.binary_path()
-    except FileNotFoundError as e:
-        typer.secho(str(e), fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=127)
-
-    cmd = [
-        bin_path,
-        "serve",
-        "--host", host,
-        "--port", str(port),
-        "--log-format", "pretty",
-        "--log-level", "info",
-    ]
-    typer.echo(f"[kros browse serve] exec: {' '.join(cmd)}", err=True)
-    # exec so Ctrl+C / signals go straight to the driver, no PID indirection.
-    os.execvp(cmd[0], cmd)
+    """Scroll the page, or bring an element into view."""
+    if ref is None and x is None and y is None:
+        typer.secho("scroll needs --ref or --x/--y", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=EXIT_BAD_INPUT)
+    with _handle_errors():
+        state = _driver().scroll(ref=ref, x=x, y=y)
+        _echo(formatting.format_page_state(_dump(state)))
 
 
-@browse_app.command()
-def info() -> None:
-    """Print the active driver, binary, version, and CDP endpoint status."""
-    driver = get_driver()
-    endpoint = get_endpoint()
-    typer.echo(f"driver:   {driver.name}")
-    try:
-        typer.echo(f"binary:   {driver.binary_path()}")
-        typer.echo(f"version:  {driver.version()}")
-    except FileNotFoundError as e:
-        typer.echo(f"binary:   NOT FOUND ({e})")
-    typer.echo(f"cdp:      {endpoint.ws_url}")
-    typer.echo(f"alive:    {driver.is_alive(endpoint)}")
-    typer.echo(
-        "override: KROS_BROWSE_DRIVER / KROS_BROWSE_LIGHTPANDA_BIN / "
-        "KROS_BROWSE_CDP_HOST / KROS_BROWSE_CDP_PORT"
-    )
+@browse_app.command("eval")
+def eval_cmd(
+    script: str = typer.Option(
+        ..., "--script", help="JavaScript expression to evaluate on the current page."
+    ),
+) -> None:
+    """Escape hatch: run arbitrary JS, print the stringified return value."""
+    with _handle_errors():
+        val = _driver().eval(script=script)
+        _echo(str(val))
+
+
+# ---------------------------------------------------------------------------
+# Tier 3 — completion
+# ---------------------------------------------------------------------------
+
+
+@browse_app.command("press")
+def press_cmd(
+    key: str = typer.Option(
+        ..., "--key", help="Key to press (e.g. 'Enter', 'Tab', 'a')."
+    ),
+    ref: Optional[int] = typer.Option(
+        None, "--ref", help="Focus this element before pressing."
+    ),
+) -> None:
+    """Send a keydown+keyup pair."""
+    with _handle_errors():
+        state = _driver().press(key=key, ref=ref)
+        _echo(formatting.format_page_state(_dump(state)))
+
+
+@browse_app.command("hover")
+def hover_cmd(
+    ref: int = typer.Option(..., "--ref", help="Element ref to hover."),
+) -> None:
+    """Hover over an element."""
+    with _handle_errors():
+        state = _driver().hover(ref=ref)
+        _echo(formatting.format_page_state(_dump(state)))
+
+
+@browse_app.command("select")
+def select_cmd(
+    ref: int = typer.Option(..., "--ref", help="Ref of the <select> element."),
+    value: str = typer.Option(..., "--value", help="The option value to select."),
+) -> None:
+    """Pick an option in a ``<select>`` dropdown by value."""
+    with _handle_errors():
+        state = _driver().select(ref=ref, value=value)
+        _echo(formatting.format_page_state(_dump(state)))
+
+
+@browse_app.command("check")
+def check_cmd(
+    ref: int = typer.Option(..., "--ref", help="Ref of the checkbox/radio."),
+    checked: bool = typer.Option(
+        ..., "--checked", help="True to check, False to uncheck."
+    ),
+) -> None:
+    """Set the checked state of a checkbox / radio."""
+    with _handle_errors():
+        state = _driver().check(ref=ref, checked=checked)
+        _echo(formatting.format_page_state(_dump(state)))
+
+
+# ---------------------------------------------------------------------------
+# registration
+# ---------------------------------------------------------------------------
 
 
 def register(app: typer.Typer) -> None:
+    """Entry point called from ``kros.cli``."""
     app.add_typer(browse_app, name="browse")
