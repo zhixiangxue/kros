@@ -1,0 +1,46 @@
+[project]
+name = "kros"
+version = "0.0.1"
+description = "Kros Agent OS — image-side CLI (runs inside the Kros container)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "zhixiangxue" }]
+dependencies = [
+    "typer>=0.12",
+    "fylepy>=0.1",
+    "seeka>=0.1",
+    "dokapy>=0.1",
+    "playwright>=1.40",
+    "pydantic>=2",
+    "python-dotenv>=1",
+]
+
+[project.scripts]
+kros = "kros.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kros"]
+
+[tool.uv]
+# Limit universal resolution to the environments we actually target:
+# development happens on macOS, production runs inside a Linux container.
+# Without this, uv tries to lock for every platform and fails on heavy
+# optional deps (e.g. onnxruntime via fylepy[audio]) that skip macOS x86_64.
+environments = [
+    "sys_platform == 'darwin'",
+    "sys_platform == 'linux'",
+]
+
+[tool.uv.sources]
+# During local development, pull seeka from the sibling checkout instead
+# of PyPI. Consumers who don't have this checkout will fall back to the
+# PyPI release declared in [project].dependencies above.
+seeka = { path = "../../seeka-ai", editable = true }
+# Same story for dokapy — sibling checkout for in-flight driver work
+# (bubblewrap runtime is still maturing).
+dokapy = { path = "../../doka-ai", editable = true }

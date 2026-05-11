@@ -98,7 +98,10 @@ ipython_config.py
 #   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
 #   This is especially recommended for binary packages to ensure reproducibility, and is more
 #   commonly ignored for libraries.
-# uv.lock
+# Kros is distributed via `uv tool install --editable ./image`, not via a cloned+sync'd
+# source tree, so reproducibility is not driven by this lockfile. Keeping it out of git
+# also avoids long-standing resolve failures on hosts where transitive wheels are platform-incompatible.
+uv.lock
 
 # poetry
 #   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
@@ -216,3 +219,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+design/
+.qoder/
+
+# Local scratch area: downloaded binaries (lightpanda, etc.), ad-hoc experiments.
+tmp/
