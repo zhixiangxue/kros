@@ -78,7 +78,16 @@ class LightpandaMCPDriver(BrowseDriver):
             )
 
         # First RPC: the actual navigation.
-        result = self._rpc("open", {"url": url, "timeout_ms": timeout_ms})
+        try:
+            result = self._rpc("open", {"url": url, "timeout_ms": timeout_ms})
+        except DriverError:
+            # Navigation failed — tear down the daemon we just spawned
+            # so the user isn't stuck with SessionExists on retry.
+            try:
+                self.close()
+            except Exception:
+                pass
+            raise
         return PageState.model_validate(result)
 
     def read(self, *, selector: Optional[str] = None) -> ReadResult:
