@@ -195,10 +195,24 @@ class LightpandaMCPEngine:
     # --- tier 1 -------------------------------------------------------
 
     def open(self, url: str, *, timeout_ms: int = 15000) -> PageState:
-        self._mcp.call(
-            "goto", {"url": url, "timeout": timeout_ms, "waitUntil": "load"}
-        )
-        return self._refresh_state_from_eval(fallback_url=url)
+        # NOTE: we deliberately do NOT pass waitUntil here.
+        # lightpanda's default is 'done' (more lenient than 'load', which
+        # waits for every subresource); heavy pages like duckduckgo/html
+        # routinely OperationTimedout on 'load'.
+        self._mcp.call("goto", {"url": url, "timeout": timeout_ms})
+        state = self._refresh_state_from_eval(fallback_url=url)
+
+        # lightpanda reports isError=false + "Navigated successfully."
+        # even when stderr shows OperationTimedout. The only reliable
+        # signal that navigation actually happened is location.href
+        # moving off about:blank.
+        if state.url in ("", "about:blank") and url not in ("", "about:blank"):
+            raise DriverError(
+                f"navigation to {url!r} did not complete "
+                f"(page still at {state.url!r}); likely OperationTimedout. "
+                f"Try a lighter URL, increase --timeout, or check the target is reachable."
+            )
+        return state
 
     def read(self, *, selector: Optional[str] = None) -> ReadResult:
         if selector is not None:
