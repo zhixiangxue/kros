@@ -24,8 +24,14 @@ _REGISTRY: dict[str, str] = {
 }
 
 
-def get_driver(name: Optional[str] = None) -> "BrowseDriver":
-    """Resolve and instantiate the driver to use."""
+def get_driver(tab_id: int, name: Optional[str] = None) -> "BrowseDriver":
+    """Resolve and instantiate the driver bound to ``tab_id``.
+
+    Every tab is isolated: its own socket, pid file, daemon, and
+    browser process. Passing the tab id here is how that isolation
+    flows down into the driver. The CLI decides which tab via the
+    ``--tab`` flag or the 'current tab' pointer.
+    """
     chosen = name or os.environ.get(ENV_DRIVER, "lightpanda_mcp")
     if chosen not in _REGISTRY:
         raise ValueError(
@@ -34,4 +40,4 @@ def get_driver(name: Optional[str] = None) -> "BrowseDriver":
         )
     module_path, class_name = _REGISTRY[chosen].split(":")
     cls = getattr(importlib.import_module(module_path), class_name)
-    return cls()
+    return cls(tab_id)

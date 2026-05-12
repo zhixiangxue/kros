@@ -31,13 +31,14 @@ import sys
 import threading
 from typing import Any
 
+from kros.commands.browse._runtime import tab_dir
 from kros.commands.browse.contract import (
     OP_SHUTDOWN,
     VALID_OPS,
     DriverError,
 )
 
-from ._paths import log_path, pid_path, runtime_dir, socket_path
+from ._paths import log_path, pid_path, socket_path
 from .engine import LightpandaMCPEngine
 
 log = logging.getLogger("kros.browse.lightpanda_mcp.daemon")
@@ -46,21 +47,22 @@ log = logging.getLogger("kros.browse.lightpanda_mcp.daemon")
 class Daemon:
     """Owns the engine, listens on unix socket, dispatches requests."""
 
-    def __init__(self) -> None:
+    def __init__(self, tab_id: int) -> None:
+        self._tab_id = tab_id
         self._engine: Any = None  # LightpandaMCPEngine — typed Any to avoid circular
         self._srv: socket.socket | None = None
         self._shutdown = threading.Event()
         self._engine_lock = threading.Lock()
 
     def run(self) -> None:
-        rd = runtime_dir()
-        rd.mkdir(parents=True, exist_ok=True)
+        td = tab_dir(self._tab_id)
+        td.mkdir(parents=True, exist_ok=True)
 
         # Start the engine first; failure here is fatal and surfaced via
         # the absent socket + daemon.log tail.
         self._engine = LightpandaMCPEngine()
 
-        sp = socket_path()
+        sp = socket_path(self._tab_id)
         if sp.exists():
             try:
                 sp.unlink()
@@ -71,13 +73,14 @@ class Daemon:
         self._srv.listen(8)
         os.chmod(sp, 0o600)
 
-        pid_path().write_text(str(os.getpid()))
+        pid_path(self._tab_id).write_text(str(os.getpid()))
 
         signal.signal(signal.SIGTERM, self._on_signal)
         signal.signal(signal.SIGINT, self._on_signal)
 
         log.info(
-            "lightpanda_mcp daemon ready: pid=%d socket=%s",
+            "lightpanda_mcp daemon ready: tab=%d pid=%d socket=%s",
+            self._tab_id,
             os.getpid(),
             sp,
         )
@@ -189,7 +192,7 @@ class Daemon:
                 self._srv.close()
             except Exception:
                 pass
-        for p in (socket_path(), pid_path()):
+        for p in (socket_path(self._tab_id), pid_path(self._tab_id)):
             try:
                 p.unlink(missing_ok=True)
             except Exception:
@@ -202,14 +205,14 @@ class Daemon:
 # ---------------------------------------------------------------------------
 
 
-def daemonize_and_run() -> None:
+def daemonize_and_run(tab_id: int) -> None:
     """Double-fork + setsid + redirect stdio, then :meth:`Daemon.run`.
 
     Parent returns immediately to the proxy; child becomes a detached
-    daemon and only exits via ``os._exit``.
+    daemon (bound to ``tab_id``) and only exits via ``os._exit``.
     """
-    rd = runtime_dir()
-    rd.mkdir(parents=True, exist_ok=True)
+    td = tab_dir(tab_id)
+    td.mkdir(parents=True, exist_ok=True)
 
     first_child = os.fork()
     if first_child != 0:
@@ -225,9 +228,9 @@ def daemonize_and_run() -> None:
     if os.fork() != 0:
         os._exit(0)
 
-    os.chdir(str(rd))
+    os.chdir(str(td))
     os.umask(0o077)
-    lf = log_path()
+    lf = log_path(tab_id)
     logfd = os.open(str(lf), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     os.dup2(logfd, 1)
     os.dup2(logfd, 2)
@@ -244,7 +247,7 @@ def daemonize_and_run() -> None:
     )
 
     try:
-        Daemon().run()
+        Daemon(tab_id).run()
     except Exception:
         log.exception("daemon crashed during startup")
         os._exit(1)

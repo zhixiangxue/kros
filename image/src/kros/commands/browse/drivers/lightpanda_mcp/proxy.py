@@ -41,43 +41,53 @@ _DAEMON_READY_TIMEOUT_S = 30.0
 class LightpandaMCPDriver(BrowseDriver):
     """BrowseDriver impl that fronts a lightpanda_mcp daemon.
 
+    One instance is scoped to **one tab**. The tab id selects which
+    ``~/.kros/browse/tabs/<id>/`` the daemon lives under; independent
+    tabs never collide on sockets, pid files, or lightpanda processes.
+
     Instances are cheap to create — they hold no persistent resources.
     State lives entirely in the daemon process.
     """
 
     name = "lightpanda_mcp"
 
+    def __init__(self, tab_id: int) -> None:
+        self._tab_id = tab_id
+
     # --- tier 1 ------------------------------------------------------
 
-    def open(self, url: str, *, timeout_ms: int = 15000) -> PageState:
-        if is_daemon_alive():
+    def open(self, url: str, *, timeout_ms: int = 15000) -> ReadResult:
+        if is_daemon_alive(self._tab_id):
             raise SessionExistsError()
 
         # Clean up stale artifacts from a previously crashed daemon.
-        for p in (socket_path(), pid_path()):
+        for p in (socket_path(self._tab_id), pid_path(self._tab_id)):
             try:
                 p.unlink(missing_ok=True)
             except OSError:
                 pass
 
-        # Fork the daemon. Returns in parent; child is detached and
-        # running Daemon.run().
-        daemon_mod.daemonize_and_run()
+        # Fork the daemon for this tab. Returns in parent; child is
+        # detached and running Daemon.run().
+        daemon_mod.daemonize_and_run(self._tab_id)
 
         # Wait until the daemon has spawned lightpanda and bound its
         # socket (the last step before accept()).
         deadline = time.monotonic() + _DAEMON_READY_TIMEOUT_S
         while time.monotonic() < deadline:
-            if is_daemon_alive():
+            if is_daemon_alive(self._tab_id):
                 break
             time.sleep(0.1)
         else:
             raise DriverError(
                 "lightpanda_mcp daemon did not become ready within "
-                f"{_DAEMON_READY_TIMEOUT_S:g}s; check ~/.kros/browse/daemon.log"
+                f"{_DAEMON_READY_TIMEOUT_S:g}s; check "
+                f"~/.kros/browse/tabs/{self._tab_id}/daemon.log"
             )
 
-        # First RPC: the actual navigation.
+        # First RPC: navigation + initial snapshot in one round-trip.
+        # Engine.open returns a ReadResult (full page content) so the
+        # agent doesn't need a follow-up `read` just to see what loaded.
         try:
             result = self._rpc("open", {"url": url, "timeout_ms": timeout_ms})
         except DriverError:
@@ -88,7 +98,7 @@ class LightpandaMCPDriver(BrowseDriver):
             except Exception:
                 pass
             raise
-        return PageState.model_validate(result)
+        return ReadResult.model_validate(result)
 
     def read(self, *, selector: Optional[str] = None) -> ReadResult:
         result = self._rpc("read", {"selector": selector})
@@ -103,8 +113,8 @@ class LightpandaMCPDriver(BrowseDriver):
         )
 
     def close(self) -> None:
-        """Idempotent: no-op if no daemon is running."""
-        if not is_daemon_alive():
+        """Idempotent: no-op if this tab's daemon is not running."""
+        if not is_daemon_alive(self._tab_id):
             return
         try:
             self._rpc(OP_SHUTDOWN, {})
@@ -114,31 +124,31 @@ class LightpandaMCPDriver(BrowseDriver):
         # Wait for the daemon to finish tearing down (socket goes away).
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
-            if not socket_path().exists():
+            if not socket_path(self._tab_id).exists():
                 return
             time.sleep(0.05)
 
         # Last resort: SIGTERM the daemon by pid.
         try:
-            pid = int(pid_path().read_text().strip())
+            pid = int(pid_path(self._tab_id).read_text().strip())
             os.kill(pid, 15)
         except (OSError, ValueError):
             pass
 
     def info(self) -> SessionInfo:
-        if not is_daemon_alive():
+        if not is_daemon_alive(self._tab_id):
             return SessionInfo(alive=False, driver=self.name)
         result = self._rpc("info", {})
         info = SessionInfo.model_validate(result)
         # Enrich with daemon-level facts the engine can't know.
         try:
-            dp = int(pid_path().read_text().strip())
+            dp = int(pid_path(self._tab_id).read_text().strip())
         except (OSError, ValueError):
             dp = None
         return info.model_copy(
             update={
                 "daemon_pid": dp,
-                "socket_path": str(socket_path()),
+                "socket_path": str(socket_path(self._tab_id)),
             }
         )
 
@@ -210,9 +220,9 @@ class LightpandaMCPDriver(BrowseDriver):
         failure. Callers should translate the returned plain Python
         structure into the appropriate Pydantic model.
         """
-        if not is_daemon_alive():
+        if not is_daemon_alive(self._tab_id):
             raise NoSessionError()
-        sp = socket_path()
+        sp = socket_path(self._tab_id)
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.settimeout(op_timeout_s)
         try:
