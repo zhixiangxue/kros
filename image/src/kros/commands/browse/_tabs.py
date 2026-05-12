@@ -20,6 +20,26 @@ points at)::
 Tab ids are monotonically increasing integers starting at 1; they are
 never reused, so ``close``ing tab 3 and ``open``ing a new one gives you
 tab 4 (same mental model as a browser's tab counter).
+
+Why "never reused" is a hard invariant — **do not "fix" this**:
+
+The primary consumer of ``kros browse`` is an LLM agent, whose context
+may carry stale tab handles across turns. Consider::
+
+    turn 1: open https://A           -> tab 3    (agent remembers "tab 3 = A")
+    turn 5: close tab 3
+    turn 9: open https://B           -> if we reused id, this is "tab 3" too
+    turn 12: agent calls `read --tab 3`  expecting A, silently gets B
+
+Id reuse turns a crisp error ("tab 3 not found") into a **silent content
+swap** — the worst failure mode for a system that LLMs reason over. The
+counter growing unbounded is pure cosmetics; monotonicity is correctness.
+
+Python ints have no upper bound, the counter file is a single line of
+ASCII, and nothing downstream cares about the magnitude. If humans ever
+find a 6-digit tab id visually offensive, the escape hatch is a manual
+``rm ~/.kros/browse/counter`` when no tabs are live — not code that
+reuses ids automatically.
 """
 
 from __future__ import annotations
@@ -95,6 +115,10 @@ def _locked() -> Iterator[None]:
 
 def allocate_next_tab_id() -> int:
     """Reserve a fresh tab id; never returns a value seen before.
+
+    The "never reused" contract is load-bearing for LLM safety — see the
+    module docstring for why reusing ids causes silent content swaps in
+    agent context. Do not add a reset/recycle path here.
 
     Also creates the tab directory so the driver's daemon/engine has a
     valid cwd to chdir into.
