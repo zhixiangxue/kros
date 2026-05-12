@@ -6,7 +6,7 @@ relay daemon). Other drivers may use ``tab_dir()`` for entirely
 different files.
 
 Tab registry (counter / current / list) is driver-neutral and lives
-in :mod:`kros.commands.browse._runtime`.
+in :mod:`kros.commands.browse._tabs`.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from __future__ import annotations
 import socket
 from pathlib import Path
 
-from kros.commands.browse._runtime import tab_dir
+from kros.commands.browse._tabs import tab_dir
 from kros.commands.browse.contract import (
     DAEMON_LOG_BASENAME,
     PID_BASENAME,

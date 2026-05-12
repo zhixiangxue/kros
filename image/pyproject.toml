@@ -14,6 +14,7 @@ dependencies = [
     "playwright>=1.40",
     "pydantic>=2",
     "python-dotenv>=1",
+    "httpx[socks]>=0.27",
 ]
 
 [project.scripts]
@@ -35,6 +36,18 @@ environments = [
     "sys_platform == 'darwin'",
     "sys_platform == 'linux'",
 ]
+
+# Use Aliyun PyPI mirror as the default index to speed up installs in
+# China. PyPI is kept as an explicit fallback so packages missing from
+# the mirror still resolve.
+[[tool.uv.index]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple/"
 
 [tool.uv.sources]
 # During local development, pull seeka from the sibling checkout instead

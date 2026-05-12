@@ -31,7 +31,7 @@ import sys
 import threading
 from typing import Any
 
-from kros.commands.browse._runtime import tab_dir
+from kros.commands.browse._tabs import tab_dir
 from kros.commands.browse.contract import (
     OP_SHUTDOWN,
     VALID_OPS,

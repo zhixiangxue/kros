@@ -1,8 +1,8 @@
-"""Runtime layout & tab registry for ``kros browse``.
+"""Tab registry for ``kros browse`` — driver-neutral.
 
-This is **driver-neutral**: every backend (lightpanda_mcp today;
-chromium_cdp, browserbase tomorrow) shares the same notion of "a tab"
-and the same on-disk conventions for where that tab's state lives.
+Every backend (``lightpanda_mcp`` today; ``chromium_cdp``, ``browserbase``
+tomorrow) shares the same notion of "a tab" and the same on-disk
+conventions for where that tab's state lives.
 
 Layout under ``~/.kros/browse/`` (or whatever ``$KROS_BROWSE_RUNTIME_DIR``
 points at)::

@@ -41,7 +41,7 @@ from typing import Any, Iterator, Optional
 import typer
 
 from kros.commands.browse import formatting
-from kros.commands.browse._runtime import (
+from kros.commands.browse._tabs import (
     allocate_next_tab_id,
     list_tab_ids,
     read_current_tab,
