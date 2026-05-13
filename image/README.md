@@ -105,3 +105,52 @@ kros browse serve --port 9222
 ```
 
 覆盖默认值用环境变量：`KROS_BROWSE_DRIVER` / `KROS_BROWSE_LIGHTPANDA_BIN` / `KROS_BROWSE_CDP_HOST` / `KROS_BROWSE_CDP_PORT`。
+
+## Docker 镜像
+
+仅支持 `linux/amd64`（lightpanda 只发 x86_64，sandbox 走 bubblewrap）。
+
+### 构建
+
+```bash
+docker build -t kros:dev ./image
+
+# 钉一个具体的 lightpanda release tag（默认 nightly）
+docker build -t kros:dev \
+  --build-arg LIGHTPANDA_VERSION=nightly \
+  ./image
+```
+
+镜像内预置：`bubblewrap`（sandbox 默认 runtime）、`/usr/local/bin/lightpanda`（browse 默认驱动）、`/app/.venv` 下的 `kros` 入口。`ENTRYPOINT` 就是 `kros`，所以容器后面跟子命令即可。
+
+### 运行
+
+```bash
+# read — 挂载一个目录进来再读
+docker run --rm -v $PWD:/workspace kros:dev read ./report.pdf
+
+# memory — 挂载 ~/.kros 持久化 memos + 复用 .env 里的 API key
+docker run --rm -v $HOME/.kros:/root/.kros kros:dev memory list
+
+# browse — lightpanda 已内置，直接用
+docker run --rm kros:dev browse open https://example.com
+
+# sandbox — bubblewrap 需要 user namespaces，放宽默认 seccomp 即可
+docker run --rm --security-opt seccomp=unconfined \
+  kros:dev sandbox run "echo hello from bwrap"
+```
+
+### 配置注入
+
+容器内 `kros` 启动时会加载 `/root/.kros/.env`（和宿主侧行为一致）。两种注入方式任选：
+
+```bash
+# 方式 A：挂载宿主的 ~/.kros
+docker run --rm -v $HOME/.kros:/root/.kros kros:dev memory remember "..."
+
+# 方式 B：docker run -e 直接注入（优先级高于 .env）
+docker run --rm \
+  -e KROS_LLM_URI=openai/gpt-4o-mini \
+  -e KROS_LLM_API_KEY=sk-xxxx \
+  kros:dev memory remember "..."
+```

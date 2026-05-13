@@ -27,7 +27,7 @@ load_dotenv(Path.home() / ".kros" / ".env", override=False)
 
 app = typer.Typer(
     name="kros",
-    help="Kros — Agent OS image-side CLI.",
+    help="Kros — Agent OS CLI.",
     no_args_is_help=True,
     add_completion=False,
     context_settings={"help_option_names": ["-h", "--help"]},
