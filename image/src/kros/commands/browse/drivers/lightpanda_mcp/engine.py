@@ -23,6 +23,7 @@ from kros.commands.browse.contract import (
     DriverError,
     Element,
     FindResult,
+    NavigationTimeoutError,
     PageState,
     ReadResult,
     SessionInfo,
@@ -202,7 +203,7 @@ class LightpandaMCPEngine:
 
     # --- tier 1 -------------------------------------------------------
 
-    def open(self, url: str, *, timeout_ms: int = 15000) -> ReadResult:
+    def open(self, url: str, *, timeout_ms: int = 5000) -> ReadResult:
         # NOTE: we deliberately do NOT pass waitUntil here.
         # lightpanda's default is 'done' (more lenient than 'load', which
         # waits for every subresource); heavy pages like duckduckgo/html
@@ -216,14 +217,14 @@ class LightpandaMCPEngine:
         # lightpanda reports isError=false + "Navigated successfully."
         # even when stderr shows OperationTimedout. The only reliable
         # signal that navigation actually happened is location.href
-        # moving off about:blank.
+        # moving off about:blank. Surface timeout as a distinct exception
+        # so agents can retry with a larger --timeout vs. giving up.
         if self._url in ("", "about:blank") and url not in ("", "about:blank"):
-            raise DriverError(
-                f"navigation to {url!r} did not complete "
-                f"(page still at {self._url!r}). Possible causes: URL "
-                f"unreachable from this host, site blocks headless browsers, "
-                f"or lightpanda engine limitation on this page. "
-                f"Try a different URL or check ~/.kros/browse/daemon.log."
+            raise NavigationTimeoutError(
+                f"open({url!r}) did not complete within {timeout_ms}ms "
+                f"(page still at {self._url!r}). Retry with a larger "
+                f"--timeout, or inspect ~/.kros/browse/tabs/*/daemon.log "
+                f"for network/engine errors."
             )
 
         # Return a full snapshot so the caller gets page content in one
@@ -259,7 +260,7 @@ class LightpandaMCPEngine:
             truncated=truncated,
         )
 
-    def click(self, *, ref: int) -> PageState:
+    def click(self, *, ref: int, timeout_ms: int = 5000) -> PageState:
         # lightpanda's click tool reply is human-prose
         # ("Clicked element ... Page url: ..., title: ..."), so we cannot
         # parse it as JSON. We rely on location.href via evaluate to
@@ -268,22 +269,54 @@ class LightpandaMCPEngine:
         self._mcp.call("click", {"backendNodeId": ref})
         state = self._refresh_state_from_eval()
 
-        # Confirmed lightpanda limitation (probe_lightpanda_click.py):
-        # `click` only dispatches the event; it does NOT execute the
-        # default action of <a href>. If the URL didn't move and the
-        # target is a link with an href, navigate explicitly.
-        if state.url == pre_url:
-            elem = self._elements_by_ref.get(ref)
-            if elem is not None and elem.role == "link" and elem.href:
-                log.info(
-                    "click(ref=%d): lightpanda did not follow link; "
-                    "falling back to goto(%s)",
-                    ref,
-                    elem.href,
-                )
-                self._mcp.call("goto", {"url": elem.href, "timeout": 15000})
-                self._elements_by_ref.clear()
-                state = self._refresh_state_from_eval(fallback_url=elem.href)
+        # Confirmed lightpanda limitation (tmp/probe_lightpanda_click.py
+        # + tmp/probe_click_async_follow.py): `click` only dispatches the
+        # event; it does NOT execute the default action of <a href>,
+        # even after waiting 20s. If the URL didn't move and the target
+        # is a link with an href, navigate explicitly via goto.
+        if state.url != pre_url:
+            return state
+        elem = self._elements_by_ref.get(ref)
+        if elem is None or elem.role != "link" or not elem.href:
+            return state
+
+        target = elem.href
+        log.info(
+            "click(ref=%d): lightpanda did not follow link; "
+            "falling back to goto(%s) with timeout=%dms",
+            ref,
+            target,
+            timeout_ms,
+        )
+        # Use the caller-supplied timeout verbatim — the agent chose the
+        # budget. No internal 30s hardcode: that was hiding real cost
+        # from the agent and made retries impossible.
+        try:
+            self._mcp.call("goto", {"url": target, "timeout": timeout_ms})
+        except DriverError as e:
+            restored = self._try_restore(pre_url)
+            raise DriverError(
+                f"click(ref={ref}): goto({target!r}) failed: {e}. "
+                f"Original page {'restored' if restored else 'could not be restored'}."
+            ) from e
+
+        self._elements_by_ref.clear()
+        state = self._refresh_state_from_eval(fallback_url=target)
+
+        # lightpanda's goto tool returns "Navigated successfully" even on
+        # timeout (documented known behavior). The only reliable failure
+        # signals are location.href moving to about:blank, or the
+        # markdown tool returning a "Navigation failed" notice.
+        if self._navigation_failed(state.url):
+            restored = self._try_restore(pre_url)
+            raise NavigationTimeoutError(
+                f"click(ref={ref}): navigation to {target!r} did not "
+                f"complete within {timeout_ms}ms. "
+                f"Original page {'restored' if restored else 'could not be restored'}. "
+                f"Retry with a larger --timeout, or try "
+                f"`kros read --url {target}` / `curl` if the resource "
+                f"isn't HTML."
+            )
         return state
 
     def fill(self, *, ref: int, value: str) -> PageState:
@@ -403,6 +436,36 @@ class LightpandaMCPEngine:
         except DriverError:
             pass
         return PageState(url=self._url, title=self._title)
+
+    @staticmethod
+    def _navigation_failed(url: str) -> bool:
+        # about:blank after a goto means lightpanda bailed (typically
+        # OperationTimedout). Empty url is a similar "nothing loaded"
+        # signal. Either way the tab is not on the target page.
+        return url in ("", "about:blank")
+
+    def _try_restore(self, pre_url: str) -> bool:
+        """Best-effort: put the tab back on pre_url after a failed nav.
+
+        Returns True if the tab is safely back on pre_url (or was never
+        on a real page to begin with), False if lightpanda is now stuck
+        on something else (typically about:blank from the failed goto).
+        Caller uses this to word the error accurately.
+        """
+        if not pre_url or pre_url == "about:blank":
+            self._url = pre_url
+            self._title = ""
+            return True
+        try:
+            # Restore uses a conservative, independent budget — the
+            # user's --timeout is for the *intended* navigation; we
+            # shouldn't blow a second copy of it on recovery.
+            self._mcp.call("goto", {"url": pre_url, "timeout": 10000})
+            self._refresh_state_from_eval(fallback_url=pre_url)
+            return not self._navigation_failed(self._url)
+        except DriverError:
+            log.warning("click fallback: could not restore page to %s", pre_url)
+            return False
 
 
 def _ensure_list(x: Any) -> list:

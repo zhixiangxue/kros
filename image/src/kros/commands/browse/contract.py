@@ -130,9 +130,9 @@ class BrowseDriver(Protocol):
     name: str
 
     # --- Tier 1: core 6 ---
-    def open(self, url: str, *, timeout_ms: int = 15000) -> ReadResult: ...
+    def open(self, url: str, *, timeout_ms: int = 5000) -> ReadResult: ...
     def read(self, *, selector: Optional[str] = None) -> ReadResult: ...
-    def click(self, *, ref: int) -> PageState: ...
+    def click(self, *, ref: int, timeout_ms: int = 5000) -> PageState: ...
     def fill(self, *, ref: int, value: str) -> PageState: ...
     def close(self) -> None: ...
     def info(self) -> SessionInfo: ...
@@ -190,6 +190,25 @@ class SessionExistsError(DriverError):
 
     def __init__(self, msg: str = "a browse session is already open; run `kros browse close` first") -> None:
         super().__init__(msg)
+
+
+class NavigationTimeoutError(DriverError):
+    """``open`` or ``click``-fallback-goto did not complete within timeout.
+
+    Design intent: the agent supplied a ``--timeout`` (default 5s) as an
+    explicit statement of how long it's willing to wait. When the budget
+    is exceeded, we surface a *distinct* exception type so agents can:
+
+    - retry the same op with a larger ``--timeout``,
+    - switch to a different tool (``kros read --url`` for PDFs, plain
+      ``curl`` for raw bytes),
+
+    …instead of conflating this with "URL unreachable" or "lightpanda
+    engine limitation on this page", which are :class:`DriverError`s.
+
+    For ``click``, the driver best-effort restores the tab to the
+    pre-click URL so the agent's session isn't stranded on about:blank.
+    """
 
 
 # ---------------------------------------------------------------------------

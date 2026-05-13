@@ -22,6 +22,7 @@ from kros.commands.browse.contract import (
     BrowseDriver,
     DriverError,
     FindResult,
+    NavigationTimeoutError,
     NoSessionError,
     PageState,
     ReadResult,
@@ -56,7 +57,7 @@ class LightpandaMCPDriver(BrowseDriver):
 
     # --- tier 1 ------------------------------------------------------
 
-    def open(self, url: str, *, timeout_ms: int = 15000) -> ReadResult:
+    def open(self, url: str, *, timeout_ms: int = 5000) -> ReadResult:
         if is_daemon_alive(self._tab_id):
             raise SessionExistsError()
 
@@ -89,7 +90,11 @@ class LightpandaMCPDriver(BrowseDriver):
         # Engine.open returns a ReadResult (full page content) so the
         # agent doesn't need a follow-up `read` just to see what loaded.
         try:
-            result = self._rpc("open", {"url": url, "timeout_ms": timeout_ms})
+            result = self._rpc(
+                "open",
+                {"url": url, "timeout_ms": timeout_ms},
+                op_timeout_s=max(30.0, timeout_ms / 1000 + 15.0),
+            )
         except DriverError:
             # Navigation failed — tear down the daemon we just spawned
             # so the user isn't stuck with SessionExists on retry.
@@ -104,8 +109,16 @@ class LightpandaMCPDriver(BrowseDriver):
         result = self._rpc("read", {"selector": selector})
         return ReadResult.model_validate(result)
 
-    def click(self, *, ref: int) -> PageState:
-        return PageState.model_validate(self._rpc("click", {"ref": ref}))
+    def click(self, *, ref: int, timeout_ms: int = 5000) -> PageState:
+        # IPC budget needs room for: click (fast) + fallback goto
+        # (timeout_ms) + best-effort restore (~10s) + slack.
+        return PageState.model_validate(
+            self._rpc(
+                "click",
+                {"ref": ref, "timeout_ms": timeout_ms},
+                op_timeout_s=max(30.0, timeout_ms / 1000 + 20.0),
+            )
+        )
 
     def fill(self, *, ref: int, value: str) -> PageState:
         return PageState.model_validate(
@@ -253,4 +266,6 @@ class LightpandaMCPDriver(BrowseDriver):
             raise NoSessionError(msg)
         if etype == "SessionExistsError":
             raise SessionExistsError(msg)
+        if etype == "NavigationTimeoutError":
+            raise NavigationTimeoutError(msg)
         raise DriverError(msg)

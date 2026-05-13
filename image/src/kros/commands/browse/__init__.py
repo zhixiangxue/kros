@@ -51,6 +51,7 @@ from kros.commands.browse._tabs import (
 from kros.commands.browse.contract import (
     BrowseDriver,
     DriverError,
+    NavigationTimeoutError,
     NoSessionError,
     SessionExistsError,
 )
@@ -72,6 +73,7 @@ EXIT_GENERIC = 1
 EXIT_NO_SESSION = 2
 EXIT_SESSION_EXISTS = 3
 EXIT_BAD_INPUT = 4
+EXIT_NAV_TIMEOUT = 5
 
 # RFC-3986-ish scheme test. We require an explicit scheme on ``open`` so
 # that an agent never sees the generic "navigation did not complete" error
@@ -95,6 +97,11 @@ def _handle_errors() -> Iterator[None]:
     except SessionExistsError as e:
         typer.secho(f"SessionExists: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=EXIT_SESSION_EXISTS)
+    except NavigationTimeoutError as e:
+        # Distinct from generic DriverError: agent can retry with a
+        # larger --timeout instead of giving up.
+        typer.secho(f"NavigationTimeout: {e}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=EXIT_NAV_TIMEOUT)
     except DriverError as e:
         typer.secho(f"{type(e).__name__}: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=EXIT_GENERIC)
@@ -158,10 +165,11 @@ def _tab_option() -> Any:
 def open_cmd(
     url: str = typer.Argument(..., help="URL to open (must include scheme)."),
     timeout: float = typer.Option(
-        30.0,
+        5.0,
         "--timeout",
         "-t",
-        help="Max seconds to wait for the initial goto to complete.",
+        help="Max seconds to wait for navigation. Raise for slow CDNs or "
+        "heavy pages (exit 5 on timeout so an agent can detect and retry).",
     ),
 ) -> None:
     """Open ``url`` in a new tab, make it current, and snapshot the page.
@@ -219,12 +227,21 @@ def read_cmd(
 @browse_app.command("click")
 def click_cmd(
     ref: int = typer.Option(..., "--ref", help="Element ref (from `read` or `find`)."),
+    timeout: float = typer.Option(
+        5.0,
+        "--timeout",
+        "-t",
+        help="Max seconds for the click-fallback navigation. When lightpanda's "
+        "click doesn't auto-follow <a href> (the common case), we goto(href) "
+        "ourselves — this is the budget for that. Raise for slow CDNs; exit 5 "
+        "on timeout so an agent can retry with a larger value.",
+    ),
     tab: Optional[int] = _tab_option(),
 ) -> None:
     """Click the element identified by ``--ref`` on the current (or ``--tab``) page."""
     with _handle_errors():
         tid = _resolve_tab(tab)
-        state = _driver(tid).click(ref=ref)
+        state = _driver(tid).click(ref=ref, timeout_ms=int(timeout * 1000))
         _echo(formatting.format_page_state(_dump(state)))
 
 
