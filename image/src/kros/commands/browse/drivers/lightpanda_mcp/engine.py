@@ -191,6 +191,14 @@ class LightpandaMCPEngine:
         self._mcp.spawn()
         self._url: str = ""
         self._title: str = ""
+        # Element metadata cache, keyed by ref (= backendNodeId). Filled
+        # by read() and find(); consulted by click() to recover from a
+        # confirmed lightpanda limitation: its `click` MCP tool only
+        # dispatches the click event and does NOT execute the default
+        # action of <a href> (verified via tmp/probe_lightpanda_click.py
+        # — clicking a link leaves location.href unchanged). When that
+        # happens we fall back to `goto(href)` using the cached element.
+        self._elements_by_ref: dict[int, Element] = {}
 
     # --- tier 1 -------------------------------------------------------
 
@@ -201,6 +209,9 @@ class LightpandaMCPEngine:
         # routinely OperationTimedout on 'load'.
         self._mcp.call("goto", {"url": url, "timeout": timeout_ms})
         self._refresh_state_from_eval(fallback_url=url)
+        # New page → previous backendNodeIds are stale; clear cache so
+        # click() never falls back using a ref from the prior DOM.
+        self._elements_by_ref.clear()
 
         # lightpanda reports isError=false + "Navigated successfully."
         # even when stderr shows OperationTimedout. The only reliable
@@ -237,6 +248,9 @@ class LightpandaMCPEngine:
         raw_elems = self._mcp.call("interactiveElements", {}) or []
         elements = [_parse_element(e) for e in _ensure_list(raw_elems)]
         self._refresh_state_from_eval()
+        # Refresh element metadata cache so click() can fall back via
+        # goto(href) when lightpanda's click tool fails to navigate.
+        self._elements_by_ref = {e.ref: e for e in elements}
         return ReadResult(
             url=self._url,
             title=self._title,
@@ -246,12 +260,31 @@ class LightpandaMCPEngine:
         )
 
     def click(self, *, ref: int) -> PageState:
-        # lightpanda's click tool reply does not include url/title, and a
-        # click that triggers navigation must be observed via location.href —
-        # see _refresh_state_from_eval. Without this, click() leaves the
-        # cached _url stale and `list` keeps showing the old page.
+        # lightpanda's click tool reply is human-prose
+        # ("Clicked element ... Page url: ..., title: ..."), so we cannot
+        # parse it as JSON. We rely on location.href via evaluate to
+        # observe whether navigation actually happened.
+        pre_url = self._url
         self._mcp.call("click", {"backendNodeId": ref})
-        return self._refresh_state_from_eval()
+        state = self._refresh_state_from_eval()
+
+        # Confirmed lightpanda limitation (probe_lightpanda_click.py):
+        # `click` only dispatches the event; it does NOT execute the
+        # default action of <a href>. If the URL didn't move and the
+        # target is a link with an href, navigate explicitly.
+        if state.url == pre_url:
+            elem = self._elements_by_ref.get(ref)
+            if elem is not None and elem.role == "link" and elem.href:
+                log.info(
+                    "click(ref=%d): lightpanda did not follow link; "
+                    "falling back to goto(%s)",
+                    ref,
+                    elem.href,
+                )
+                self._mcp.call("goto", {"url": elem.href, "timeout": 15000})
+                self._elements_by_ref.clear()
+                state = self._refresh_state_from_eval(fallback_url=elem.href)
+        return state
 
     def fill(self, *, ref: int, value: str) -> PageState:
         self._mcp.call("fill", {"backendNodeId": ref, "text": value})
@@ -280,9 +313,12 @@ class LightpandaMCPEngine:
         if name is not None:
             args["name"] = name
         raw = self._mcp.call("findElement", args) or []
-        return FindResult(
-            elements=[_parse_element(e) for e in _ensure_list(raw)]
-        )
+        elements = [_parse_element(e) for e in _ensure_list(raw)]
+        # Merge into cache (find returns a subset of the page; do not wipe
+        # other refs that read() may have populated).
+        for e in elements:
+            self._elements_by_ref[e.ref] = e
+        return FindResult(elements=elements)
 
     def wait(self, *, selector: str, timeout_ms: int = 5000) -> int:
         res = self._mcp.call(
