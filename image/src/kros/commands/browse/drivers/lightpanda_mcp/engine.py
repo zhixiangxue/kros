@@ -297,7 +297,7 @@ class LightpandaMCPEngine:
             restored = self._try_restore(pre_url)
             raise DriverError(
                 f"click(ref={ref}): goto({target!r}) failed: {e}. "
-                f"Original page {'restored' if restored else 'could not be restored'}."
+                f"Original page {'restored (refs are now stale — call `read` or `find` again)' if restored else 'could not be restored'}."
             ) from e
 
         self._elements_by_ref.clear()
@@ -312,9 +312,9 @@ class LightpandaMCPEngine:
             raise NavigationTimeoutError(
                 f"click(ref={ref}): navigation to {target!r} did not "
                 f"complete within {timeout_ms}ms. "
-                f"Original page {'restored' if restored else 'could not be restored'}. "
+                f"Original page {'restored (refs from before the click are now stale — call `read` or `find` again before clicking)' if restored else 'could not be restored'}. "
                 f"Retry with a larger --timeout, or try "
-                f"`kros read --url {target}` / `curl` if the resource "
+                f"`kros read {target}` / `curl` if the resource "
                 f"isn't HTML."
             )
         return state
@@ -451,7 +451,19 @@ class LightpandaMCPEngine:
         on a real page to begin with), False if lightpanda is now stuck
         on something else (typically about:blank from the failed goto).
         Caller uses this to word the error accurately.
+
+        Unconditionally clears ``_elements_by_ref``: any restore goto
+        rebuilds the DOM, which invalidates every backendNodeId from
+        the previous page. Reusing a stale ref surfaces as a confusing
+        ``Node is not an HTML element`` from lightpanda when the agent
+        retries the same click. The agent must call ``read`` or
+        ``find`` again to refresh refs before clicking.
         """
+        # Clear first so even early-return paths (pre_url blank, engine
+        # errors mid-goto) leave the cache in a consistent invalidated
+        # state.
+        self._elements_by_ref.clear()
+
         if not pre_url or pre_url == "about:blank":
             self._url = pre_url
             self._title = ""
