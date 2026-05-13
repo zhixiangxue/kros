@@ -16,9 +16,9 @@ from pathlib import Path
 import typer
 from dotenv import load_dotenv
 
-from kros.commands import browse as browse_cmd
+from kros.commands import browser as browser_cmd
+from kros.commands import file as file_cmd
 from kros.commands import memory as memory_cmd
-from kros.commands import read as read_cmd
 from kros.commands import sandbox as sandbox_cmd
 
 # Fill in missing KROS_* / provider env vars from the user-level dotenv
@@ -46,10 +46,10 @@ def _root() -> None:
 
 
 # register subcommands
-read_cmd.register(app)
+file_cmd.register(app)
 memory_cmd.register(app)
 sandbox_cmd.register(app)
-browse_cmd.register(app)
+browser_cmd.register(app)
 
 
 if __name__ == "__main__":

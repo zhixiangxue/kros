@@ -1,4 +1,4 @@
-"""Human-and-agent-friendly stdout formatters for ``kros browse``.
+"""Human-and-agent-friendly stdout formatters for ``kros browser``.
 
 Every subcommand's success output goes through one of the ``format_*``
 helpers here. The resulting text is semi-structured — easy for an LLM
@@ -87,7 +87,7 @@ def format_find_result(f: dict) -> str:
 def format_session_info(info: dict) -> str:
     alive = info.get("alive")
     if not alive:
-        return "ALIVE: no\n(no active browse session; run `kros browse open <url>` to start one)"
+        return "ALIVE: no\n(no active browser session; run `kros browser open <url>` to start one)"
     lines = [
         "ALIVE: yes",
         f"DRIVER: {info.get('driver') or ''}",

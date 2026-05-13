@@ -1,4 +1,4 @@
-"""``kros browse`` — agent-first headless browser CLI.
+"""``kros browser`` — agent-first headless browser CLI.
 
 Sixteen commands total. The 14 atomic ops work on a **current tab**
 (implicit), just like a human flips between tabs in a real browser;
@@ -24,7 +24,7 @@ Sixteen commands total. The 14 atomic ops work on a **current tab**
 - Tab management (2): list / switch
 
 The CLI is entirely driver-neutral: every command resolves a driver
-bound to a tab id via :func:`kros.commands.browse.drivers.get_driver`
+bound to a tab id via :func:`kros.commands.browser.drivers.get_driver`
 and calls the matching method on it. Whether the driver spawns a
 daemon, connects to a remote CDP endpoint, or talks to a cloud API is
 the driver's private business.
@@ -40,25 +40,25 @@ from typing import Any, Iterator, Optional
 
 import typer
 
-from kros.commands.browse import formatting
-from kros.commands.browse._tabs import (
+from kros.commands.browser import formatting
+from kros.commands.browser._tabs import (
     allocate_next_tab_id,
     list_tab_ids,
     read_current_tab,
     tab_dir,
     write_current_tab,
 )
-from kros.commands.browse.contract import (
+from kros.commands.browser.contract import (
     BrowseDriver,
     DriverError,
     NavigationTimeoutError,
     NoSessionError,
     SessionExistsError,
 )
-from kros.commands.browse.drivers import get_driver
+from kros.commands.browser.drivers import get_driver
 
 
-browse_app = typer.Typer(
+browser_app = typer.Typer(
     help="Agent-first headless browser. Tabs with an implicit 'current'; "
     "16 commands (14 atomic ops + list/switch).",
     no_args_is_help=True,
@@ -126,8 +126,8 @@ def _resolve_tab(explicit: Optional[int]) -> int:
     cur = read_current_tab()
     if cur is None:
         raise NoSessionError(
-            "no active tab; run `kros browse open <url>` first "
-            "(or `kros browse list` to see tabs)"
+            "no active tab; run `kros browser open <url>` first "
+            "(or `kros browser list` to see tabs)"
         )
     return cur
 
@@ -161,7 +161,7 @@ def _tab_option() -> Any:
 # ---------------------------------------------------------------------------
 
 
-@browse_app.command("open")
+@browser_app.command("open")
 def open_cmd(
     url: str = typer.Argument(..., help="URL to open (must include scheme)."),
     timeout: float = typer.Option(
@@ -206,7 +206,7 @@ def open_cmd(
         raise
 
 
-@browse_app.command("read")
+@browser_app.command("read")
 def read_cmd(
     tab: Optional[int] = _tab_option(),
     selector: Optional[str] = typer.Option(
@@ -224,7 +224,7 @@ def read_cmd(
         _echo(formatting.format_read_result(_dump(result)))
 
 
-@browse_app.command("click")
+@browser_app.command("click")
 def click_cmd(
     ref: int = typer.Option(..., "--ref", help="Element ref (from `read` or `find`)."),
     timeout: float = typer.Option(
@@ -245,7 +245,7 @@ def click_cmd(
         _echo(formatting.format_read_result(_dump(state)))
 
 
-@browse_app.command("fill")
+@browser_app.command("fill")
 def fill_cmd(
     ref: int = typer.Option(..., "--ref", help="Element ref of the input field."),
     value: str = typer.Option(..., "--value", help="Text to write into the field."),
@@ -258,7 +258,7 @@ def fill_cmd(
         _echo(formatting.format_read_result(_dump(state)))
 
 
-@browse_app.command("close")
+@browser_app.command("close")
 def close_cmd(
     tab: Optional[int] = _tab_option(),
     all_tabs: bool = typer.Option(
@@ -316,7 +316,7 @@ def close_cmd(
         _echo("closed.")
 
 
-@browse_app.command("reset")
+@browser_app.command("reset")
 def reset_cmd() -> None:
     """Close every tab — shortcut for ``close --all``.
 
@@ -329,7 +329,7 @@ def reset_cmd() -> None:
     close_cmd(tab=None, all_tabs=True)
 
 
-@browse_app.command("info")
+@browser_app.command("info")
 def info_cmd(
     tab: Optional[int] = _tab_option(),
 ) -> None:
@@ -349,7 +349,7 @@ def info_cmd(
 # ---------------------------------------------------------------------------
 
 
-@browse_app.command("list")
+@browser_app.command("list")
 def list_cmd() -> None:
     """List every live tab with id / url / title. ``*`` marks the current."""
     with _handle_errors():
@@ -367,7 +367,7 @@ def list_cmd() -> None:
                 f"{marker} tab={tid}  url={info.url}  title={_quote(info.title)}"
             )
         if not lines:
-            _echo("TABS (0)\n(no open tabs; run `kros browse open <url>`)")
+            _echo("TABS (0)\n(no open tabs; run `kros browser open <url>`)")
             return
         _echo(f"TABS ({len(lines)})")
         for line in lines:
@@ -375,7 +375,7 @@ def list_cmd() -> None:
         _echo("('*' = current tab)")
 
 
-@browse_app.command("switch")
+@browser_app.command("switch")
 def switch_cmd(
     tab: int = typer.Option(..., "--tab", help="Tab id to make current."),
 ) -> None:
@@ -386,7 +386,7 @@ def switch_cmd(
         info = None
     if info is None or not info.alive:
         typer.secho(
-            f"tab {tab} not found or not alive (see `kros browse list`)",
+            f"tab {tab} not found or not alive (see `kros browser list`)",
             fg=typer.colors.RED,
             err=True,
         )
@@ -406,7 +406,7 @@ def switch_cmd(
 # ---------------------------------------------------------------------------
 
 
-@browse_app.command("find")
+@browser_app.command("find")
 def find_cmd(
     role: Optional[str] = typer.Option(
         None, "--role", help="ARIA role to match (button, link, textbox, ...)."
@@ -435,7 +435,7 @@ def find_cmd(
         _echo(formatting.format_find_result(_dump(result)))
 
 
-@browse_app.command("wait")
+@browser_app.command("wait")
 def wait_cmd(
     selector: str = typer.Option(
         ..., "--selector", "-s", help="CSS selector to wait for."
@@ -452,7 +452,7 @@ def wait_cmd(
         _echo(f"ref={ref}")
 
 
-@browse_app.command("scroll")
+@browser_app.command("scroll")
 def scroll_cmd(
     ref: Optional[int] = typer.Option(
         None, "--ref", help="Scroll this element into view."
@@ -471,7 +471,7 @@ def scroll_cmd(
         _echo(formatting.format_read_result(_dump(state)))
 
 
-@browse_app.command("eval")
+@browser_app.command("eval")
 def eval_cmd(
     script: str = typer.Option(
         ..., "--script", help="JavaScript expression to evaluate on the current page."
@@ -490,7 +490,7 @@ def eval_cmd(
 # ---------------------------------------------------------------------------
 
 
-@browse_app.command("press")
+@browser_app.command("press")
 def press_cmd(
     key: str = typer.Option(
         ..., "--key", help="Key to press (e.g. 'Enter', 'Tab', 'a')."
@@ -507,7 +507,7 @@ def press_cmd(
         _echo(formatting.format_read_result(_dump(state)))
 
 
-@browse_app.command("hover")
+@browser_app.command("hover")
 def hover_cmd(
     ref: int = typer.Option(..., "--ref", help="Element ref to hover."),
     tab: Optional[int] = _tab_option(),
@@ -519,7 +519,7 @@ def hover_cmd(
         _echo(formatting.format_read_result(_dump(state)))
 
 
-@browse_app.command("select")
+@browser_app.command("select")
 def select_cmd(
     ref: int = typer.Option(..., "--ref", help="Ref of the <select> element."),
     value: str = typer.Option(..., "--value", help="The option value to select."),
@@ -532,7 +532,7 @@ def select_cmd(
         _echo(formatting.format_read_result(_dump(state)))
 
 
-@browse_app.command("check")
+@browser_app.command("check")
 def check_cmd(
     ref: int = typer.Option(..., "--ref", help="Ref of the checkbox/radio."),
     checked: bool = typer.Option(
@@ -554,4 +554,4 @@ def check_cmd(
 
 def register(app: typer.Typer) -> None:
     """Entry point called from ``kros.cli``."""
-    app.add_typer(browse_app, name="browse")
+    app.add_typer(browser_app, name="browser")

@@ -1,10 +1,10 @@
-"""Tab registry for ``kros browse`` — driver-neutral.
+"""Tab registry for ``kros browser`` — driver-neutral.
 
 Every backend (``lightpanda_mcp`` today; ``chromium_cdp``, ``browserbase``
 tomorrow) shares the same notion of "a tab" and the same on-disk
 conventions for where that tab's state lives.
 
-Layout under ``~/.kros/browse/`` (or whatever ``$KROS_BROWSE_RUNTIME_DIR``
+Layout under ``~/.kros/browser/`` (or whatever ``$KROS_BROWSER_RUNTIME_DIR``
 points at)::
 
     <runtime_dir>/
@@ -23,7 +23,7 @@ tab 4 (same mental model as a browser's tab counter).
 
 Why "never reused" is a hard invariant — **do not "fix" this**:
 
-The primary consumer of ``kros browse`` is an LLM agent, whose context
+The primary consumer of ``kros browser`` is an LLM agent, whose context
 may carry stale tab handles across turns. Consider::
 
     turn 1: open https://A           -> tab 3    (agent remembers "tab 3 = A")
@@ -38,7 +38,7 @@ counter growing unbounded is pure cosmetics; monotonicity is correctness.
 Python ints have no upper bound, the counter file is a single line of
 ASCII, and nothing downstream cares about the magnitude. If humans ever
 find a 6-digit tab id visually offensive, the escape hatch is a manual
-``rm ~/.kros/browse/counter`` when no tabs are live — not code that
+``rm ~/.kros/browser/counter`` when no tabs are live — not code that
 reuses ids automatically.
 """
 
@@ -50,7 +50,7 @@ import os
 from pathlib import Path
 from typing import Iterator, Optional
 
-from kros.commands.browse.contract import DEFAULT_RUNTIME_SUBDIR, ENV_RUNTIME_DIR
+from kros.commands.browser.contract import DEFAULT_RUNTIME_SUBDIR, ENV_RUNTIME_DIR
 
 # Top-level files under runtime_dir() that aren't part of the per-tab layout.
 _COUNTER_BASENAME = "counter"

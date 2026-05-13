@@ -1,6 +1,6 @@
-"""`kros browse` contract — the driver-neutral surface.
+"""`kros browser` contract — the driver-neutral surface.
 
-This module defines **what** ``kros browse`` means, independent of the
+This module defines **what** ``kros browser`` means, independent of the
 underlying headless browser. Three things live here:
 
 1. **Data models** (Pydantic): ``Element`` / ``PageState`` / ``ReadResult`` /
@@ -113,7 +113,7 @@ class SessionInfo(BaseModel):
 
 
 class BrowseDriver(Protocol):
-    """Every backend implementing ``kros browse`` satisfies this shape.
+    """Every backend implementing ``kros browser`` satisfies this shape.
 
     Lifecycle on the daemon side:
 
@@ -181,10 +181,10 @@ class DriverError(RuntimeError):
 class NoSessionError(DriverError):
     """A stateful op was called but no session is active.
 
-    CLI should hint the user to run ``kros browse open <url>`` first.
+    CLI should hint the user to run ``kros browser open <url>`` first.
     """
 
-    def __init__(self, msg: str = "no active browse session; run `kros browse open <url>` first") -> None:
+    def __init__(self, msg: str = "no active browser session; run `kros browser open <url>` first") -> None:
         super().__init__(msg)
 
 
@@ -195,7 +195,7 @@ class SessionExistsError(DriverError):
     agent must ``close`` first, then ``open`` again.
     """
 
-    def __init__(self, msg: str = "a browse session is already open; run `kros browse close` first") -> None:
+    def __init__(self, msg: str = "a browser session is already open; run `kros browser close` first") -> None:
         super().__init__(msg)
 
 
@@ -207,8 +207,8 @@ class NavigationTimeoutError(DriverError):
     is exceeded, we surface a *distinct* exception type so agents can:
 
     - retry the same op with a larger ``--timeout``,
-    - switch to a different tool (``kros read --url`` for PDFs, plain
-      ``curl`` for raw bytes),
+    - switch to a different tool (``kros file read`` for local files,
+      plain ``curl`` for raw bytes),
 
     …instead of conflating this with "URL unreachable" or "lightpanda
     engine limitation on this page", which are :class:`DriverError`s.
@@ -227,7 +227,7 @@ class NavigationTimeoutError(DriverError):
 #           {"ok": false, "error": "<msg>", "type": "<ExceptionName>"}  on failure
 #
 # One request → one response. Socket is reused across ops for one CLI call
-# but the CLI reconnects for every kros browse invocation (daemon stays up).
+# but the CLI reconnects for every kros browser invocation (daemon stays up).
 
 # Every method on ``BrowseDriver`` is addressable by its name. The args
 # dict is the keyword-argument payload; the daemon validates and dispatches.
@@ -250,7 +250,7 @@ VALID_OPS: frozenset[str] = frozenset(
     }
 )
 
-# Special meta-op: daemon shutdown (sent by ``kros browse close``). The
+# Special meta-op: daemon shutdown (sent by ``kros browser close``). The
 # daemon runs driver.close() then exits and unlinks the socket.
 OP_SHUTDOWN = "__shutdown__"
 
@@ -261,12 +261,12 @@ OP_SHUTDOWN = "__shutdown__"
 
 #: Where we keep the unix socket and daemon pid file. Single session for now;
 #: multi-session is not a goal (see design/01-kros-overview.md §D).
-DEFAULT_RUNTIME_SUBDIR = ".kros/browse"
+DEFAULT_RUNTIME_SUBDIR = ".kros/browser"
 SOCKET_BASENAME = "session.sock"
 PID_BASENAME = "session.pid"
 DAEMON_LOG_BASENAME = "daemon.log"
 
 #: Env overrides, all optional.
-ENV_DRIVER = "KROS_BROWSE_DRIVER"  # default "lightpanda_mcp"
-ENV_LIGHTPANDA_BIN = "KROS_BROWSE_LIGHTPANDA_BIN"  # override lightpanda binary
-ENV_RUNTIME_DIR = "KROS_BROWSE_RUNTIME_DIR"  # override ~/.kros/browse
+ENV_DRIVER = "KROS_BROWSER_DRIVER"  # default "lightpanda_mcp"
+ENV_LIGHTPANDA_BIN = "KROS_BROWSER_LIGHTPANDA_BIN"  # override lightpanda binary
+ENV_RUNTIME_DIR = "KROS_BROWSER_RUNTIME_DIR"  # override ~/.kros/browser

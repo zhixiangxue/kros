@@ -31,8 +31,8 @@ import sys
 import threading
 from typing import Any
 
-from kros.commands.browse._tabs import tab_dir
-from kros.commands.browse.contract import (
+from kros.commands.browser._tabs import tab_dir
+from kros.commands.browser.contract import (
     OP_SHUTDOWN,
     VALID_OPS,
     DriverError,
@@ -41,7 +41,7 @@ from kros.commands.browse.contract import (
 from ._paths import log_path, pid_path, socket_path
 from .engine import LightpandaMCPEngine
 
-log = logging.getLogger("kros.browse.lightpanda_mcp.daemon")
+log = logging.getLogger("kros.browser.lightpanda_mcp.daemon")
 
 
 class Daemon:

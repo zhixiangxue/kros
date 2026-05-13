@@ -1,9 +1,9 @@
-"""Driver registry for ``kros browse``.
+"""Driver registry for ``kros browser``.
 
-Each driver is a concrete implementation of :class:`kros.commands.browse.
+Each driver is a concrete implementation of :class:`kros.commands.browser.
 contract.BrowseDriver`. We register them lazily (string path) so an
 unused driver's heavy deps never load. Selection is env-driven
-(``KROS_BROWSE_DRIVER``, default ``lightpanda_mcp``).
+(``KROS_BROWSER_DRIVER``, default ``lightpanda_mcp``).
 """
 
 from __future__ import annotations
@@ -12,15 +12,15 @@ import importlib
 import os
 from typing import TYPE_CHECKING, Optional
 
-from kros.commands.browse.contract import ENV_DRIVER
+from kros.commands.browser.contract import ENV_DRIVER
 
 if TYPE_CHECKING:
-    from kros.commands.browse.contract import BrowseDriver
+    from kros.commands.browser.contract import BrowseDriver
 
 
 # driver name → "module:class" lazy import path
 _REGISTRY: dict[str, str] = {
-    "lightpanda_mcp": "kros.commands.browse.drivers.lightpanda_mcp:LightpandaMCPDriver",
+    "lightpanda_mcp": "kros.commands.browser.drivers.lightpanda_mcp:LightpandaMCPDriver",
 }
 
 
@@ -35,7 +35,7 @@ def get_driver(tab_id: int, name: Optional[str] = None) -> "BrowseDriver":
     chosen = name or os.environ.get(ENV_DRIVER, "lightpanda_mcp")
     if chosen not in _REGISTRY:
         raise ValueError(
-            f"Unknown browse driver: {chosen!r}. "
+            f"Unknown browser driver: {chosen!r}. "
             f"Known: {sorted(_REGISTRY)}. Override via {ENV_DRIVER}."
         )
     module_path, class_name = _REGISTRY[chosen].split(":")

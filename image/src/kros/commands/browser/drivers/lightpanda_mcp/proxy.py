@@ -1,12 +1,12 @@
 """CLI-side proxy driver for lightpanda_mcp.
 
-Implements :class:`kros.commands.browse.contract.BrowseDriver` by
+Implements :class:`kros.commands.browser.contract.BrowseDriver` by
 forwarding every method call to a long-lived daemon over a unix
 socket. The daemon in turn calls the real engine.
 
 All the "is there a socket? fork the daemon? wait for it to be ready?"
 logic lives here, strictly inside the lightpanda_mcp package. The CLI
-(``commands/browse/__init__.py``) treats this class as an ordinary
+(``commands/browser/__init__.py``) treats this class as an ordinary
 ``BrowseDriver`` and knows nothing about sockets or daemons.
 """
 
@@ -18,7 +18,7 @@ import socket
 import time
 from typing import Any, Optional
 
-from kros.commands.browse.contract import (
+from kros.commands.browser.contract import (
     BrowseDriver,
     DriverError,
     FindResult,
@@ -42,7 +42,7 @@ class LightpandaMCPDriver(BrowseDriver):
     """BrowseDriver impl that fronts a lightpanda_mcp daemon.
 
     One instance is scoped to **one tab**. The tab id selects which
-    ``~/.kros/browse/tabs/<id>/`` the daemon lives under; independent
+    ``~/.kros/browser/tabs/<id>/`` the daemon lives under; independent
     tabs never collide on sockets, pid files, or lightpanda processes.
 
     Instances are cheap to create — they hold no persistent resources.
@@ -82,7 +82,7 @@ class LightpandaMCPDriver(BrowseDriver):
             raise DriverError(
                 "lightpanda_mcp daemon did not become ready within "
                 f"{_DAEMON_READY_TIMEOUT_S:g}s; check "
-                f"~/.kros/browse/tabs/{self._tab_id}/daemon.log"
+                f"~/.kros/browser/tabs/{self._tab_id}/daemon.log"
             )
 
         # First RPC: navigation + initial snapshot in one round-trip.

@@ -6,7 +6,7 @@
 #   /app/.venv              Python virtualenv with kros + PyPI deps.
 #   /usr/local/bin/kros     Entrypoint (symlinked from the venv).
 #   /usr/local/bin/lightpanda
-#                           Headless browser binary used by `kros browse`.
+#                           Headless browser binary used by `kros browser`.
 #   /usr/bin/bwrap          Unprivileged sandbox runtime used by `kros sandbox`.
 #   /workspace              Default CWD; mount a host dir here for I/O.
 #
@@ -68,9 +68,9 @@ RUN uv venv /app/.venv \
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim-bookworm AS runtime
 
 # bubblewrap: backs `kros sandbox`.
-# ca-certificates: outbound HTTPS for memory/browse.
+# ca-certificates: outbound HTTPS for memory/browser.
 # curl: only used by this stage to fetch the lightpanda binary; kept
-# because `kros browse` tooling and user troubleshooting benefits from it.
+# because `kros browser` tooling and user troubleshooting benefits from it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bubblewrap \
         ca-certificates \
@@ -90,7 +90,7 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     KROS_SANDBOX_RUNTIME=bubblewrap \
-    KROS_BROWSE_LIGHTPANDA_BIN=/usr/local/bin/lightpanda
+    KROS_BROWSER_LIGHTPANDA_BIN=/usr/local/bin/lightpanda
 
 # /workspace is a conventional bind-mount target so agents can `cd` into
 # caller-supplied files without colliding with kros internals under /app.
