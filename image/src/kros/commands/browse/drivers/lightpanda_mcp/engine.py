@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -34,6 +35,45 @@ log = logging.getLogger(__name__)
 
 # Size budget for read().markdown — soft cap to keep agent tokens sane.
 _READ_MARKDOWN_MAX_BYTES = 32 * 1024
+
+
+# ---------------------------------------------------------------------------
+# fyle fallback — non-HTML resource handling
+# ---------------------------------------------------------------------------
+#
+# lightpanda can *navigate* to non-HTML resources (PDF, DOCX, images, audio,
+# ...) — location.href updates correctly — but it cannot render them: the
+# markdown tool comes back empty. fyle, the engine behind `kros read`, has
+# dedicated readers for exactly these formats. When read() lands on such a
+# URL with empty markdown, we delegate to fyle so the agent sees the
+# document content in the same round-trip it made the action.
+#
+# The whitelist is intentionally narrow: only formats where fyle is certain
+# to help AND lightpanda is certain to fail. HTML / Markdown / plain text
+# / source code are deliberately excluded — lightpanda's rendered DOM
+# (post-JS) is a strictly better input for those than fyle's static
+# extractor. Source of truth: fyle/_core/sniffer.py::_EXT_MAP entries that
+# route to non-text readers.
+_FYLE_FALLBACK_EXTS: frozenset[str] = frozenset(
+    {
+        # Office documents
+        "pdf", "docx", "xlsx", "pptx",
+        # Images (fyle emits base64 data: URLs for multimodal models)
+        "png", "jpg", "jpeg", "webp",
+        # Audio — requires fylepy[audio] extra; if missing, fyle raises
+        # a clear "install this extra" error which we surface as-is.
+        "mp3", "m4a", "wav", "flac", "ogg",
+        # Video — requires fylepy[video] extra.
+        "mp4", "m4v", "mov", "avi", "mkv", "webm",
+        # Structured data
+        "csv", "db", "sqlite", "sqlite3",
+        # Archive containers
+        "zip", "tar", "gz", "tgz", "bz2", "xz",
+    }
+)
+
+# Match the final path-segment extension of a URL, stripping ?query/#fragment.
+_URL_EXT_RE = re.compile(r"\.([A-Za-z0-9]{1,8})(?:[?#]|$)")
 
 
 # ---------------------------------------------------------------------------
@@ -252,33 +292,43 @@ class LightpandaMCPEngine:
         # Refresh element metadata cache so click() can fall back via
         # goto(href) when lightpanda's click tool fails to navigate.
         self._elements_by_ref = {e.ref: e for e in elements}
-        return ReadResult(
+        result = ReadResult(
             url=self._url,
             title=self._title,
             markdown=md,
             elements=elements,
             truncated=truncated,
         )
+        # Non-HTML resource hook: when lightpanda produced nothing and
+        # the URL is a format fyle handles, parse it inline. Part of the
+        # driver's BrowseDriver contract ("read returns page content"):
+        # the CLI stays dumb and format-agnostic.
+        return self._maybe_fyle_fallback(result)
 
-    def click(self, *, ref: int, timeout_ms: int = 5000) -> PageState:
+    def click(self, *, ref: int, timeout_ms: int = 5000) -> ReadResult:
         # lightpanda's click tool reply is human-prose
         # ("Clicked element ... Page url: ..., title: ..."), so we cannot
         # parse it as JSON. We rely on location.href via evaluate to
         # observe whether navigation actually happened.
         pre_url = self._url
         self._mcp.call("click", {"backendNodeId": ref})
-        state = self._refresh_state_from_eval()
+        self._refresh_state_from_eval()
 
         # Confirmed lightpanda limitation (tmp/probe_lightpanda_click.py
         # + tmp/probe_click_async_follow.py): `click` only dispatches the
         # event; it does NOT execute the default action of <a href>,
         # even after waiting 20s. If the URL didn't move and the target
         # is a link with an href, navigate explicitly via goto.
-        if state.url != pre_url:
-            return state
+        if self._url != pre_url:
+            # Rare path: click did mutate location (e.g. a JS handler).
+            # Return a full snapshot so the agent sees the new page.
+            return self.read()
         elem = self._elements_by_ref.get(ref)
         if elem is None or elem.role != "link" or not elem.href:
-            return state
+            # Nothing to fall back to. Still snapshot so any in-page
+            # DOM change from the click handler (menus, dialogs) is
+            # visible without a separate `read`.
+            return self.read()
 
         target = elem.href
         log.info(
@@ -301,13 +351,13 @@ class LightpandaMCPEngine:
             ) from e
 
         self._elements_by_ref.clear()
-        state = self._refresh_state_from_eval(fallback_url=target)
+        self._refresh_state_from_eval(fallback_url=target)
 
         # lightpanda's goto tool returns "Navigated successfully" even on
         # timeout (documented known behavior). The only reliable failure
         # signals are location.href moving to about:blank, or the
         # markdown tool returning a "Navigation failed" notice.
-        if self._navigation_failed(state.url):
+        if self._navigation_failed(self._url):
             restored = self._try_restore(pre_url)
             raise NavigationTimeoutError(
                 f"click(ref={ref}): navigation to {target!r} did not "
@@ -317,11 +367,15 @@ class LightpandaMCPEngine:
                 f"`kros read {target}` / `curl` if the resource "
                 f"isn't HTML."
             )
-        return state
+        # Navigation succeeded — hand back a complete snapshot of the
+        # destination page in one round-trip (markdown + fresh refs).
+        return self.read()
 
-    def fill(self, *, ref: int, value: str) -> PageState:
+    def fill(self, *, ref: int, value: str) -> ReadResult:
         self._mcp.call("fill", {"backendNodeId": ref, "text": value})
-        return self._refresh_state_from_eval()
+        # fill can trigger in-page validation / dynamic forms — return
+        # a full snapshot so the agent sees the resulting state.
+        return self.read()
 
     def close(self) -> None:
         self._mcp.close()
@@ -367,7 +421,7 @@ class LightpandaMCPEngine:
         ref: Optional[int] = None,
         x: Optional[int] = None,
         y: Optional[int] = None,
-    ) -> PageState:
+    ) -> ReadResult:
         args: dict[str, Any] = {}
         if ref is not None:
             args["backendNodeId"] = ref
@@ -376,7 +430,9 @@ class LightpandaMCPEngine:
         if y is not None:
             args["y"] = y
         self._mcp.call("scroll", args)
-        return self._refresh_state_from_eval()
+        # Scrolling exposes new elements into view; a full read gives
+        # the agent fresh refs + the newly-visible markdown section.
+        return self.read()
 
     def eval(self, *, script: str) -> str:
         res = self._mcp.call("evaluate", {"script": script})
@@ -386,24 +442,30 @@ class LightpandaMCPEngine:
 
     # --- tier 3 -------------------------------------------------------
 
-    def press(self, *, key: str, ref: Optional[int] = None) -> PageState:
+    def press(self, *, key: str, ref: Optional[int] = None) -> ReadResult:
         args: dict[str, Any] = {"key": key}
         if ref is not None:
             args["backendNodeId"] = ref
         self._mcp.call("press", args)
-        return self._refresh_state_from_eval()
+        # press often submits forms / triggers hotkeys — snapshot so
+        # the agent sees the resulting page in one round-trip.
+        return self.read()
 
-    def hover(self, *, ref: int) -> PageState:
+    def hover(self, *, ref: int) -> ReadResult:
         self._mcp.call("hover", {"backendNodeId": ref})
-        return self._refresh_state_from_eval()
+        # hover reveals tooltips / dropdown menus; new refs need to
+        # be surfaced to the agent.
+        return self.read()
 
-    def select(self, *, ref: int, value: str) -> PageState:
+    def select(self, *, ref: int, value: str) -> ReadResult:
         self._mcp.call("selectOption", {"backendNodeId": ref, "value": value})
-        return self._refresh_state_from_eval()
+        # select can trigger cascading form updates.
+        return self.read()
 
-    def check(self, *, ref: int, checked: bool) -> PageState:
+    def check(self, *, ref: int, checked: bool) -> ReadResult:
         self._mcp.call("setChecked", {"backendNodeId": ref, "checked": checked})
-        return self._refresh_state_from_eval()
+        # check can toggle dependent form fields.
+        return self.read()
 
     # --- helpers ------------------------------------------------------
 
@@ -443,6 +505,72 @@ class LightpandaMCPEngine:
         # OperationTimedout). Empty url is a similar "nothing loaded"
         # signal. Either way the tab is not on the target page.
         return url in ("", "about:blank")
+
+    def _maybe_fyle_fallback(self, result: ReadResult) -> ReadResult:
+        """If lightpanda returned empty markdown for a URL whose extension
+        is in :data:`_FYLE_FALLBACK_EXTS`, re-parse it through fyle.
+
+        Trigger — both must hold:
+
+        1. ``result.markdown`` is blank (lightpanda rendered nothing), AND
+        2. URL ends in an extension from the fyle whitelist.
+
+        Anything else is left alone, so this never masks a legitimate
+        "page loaded but is empty" signal (SPA first paint, login
+        redirect to /, etc.).
+        """
+        if result.markdown.strip():
+            return result
+        m = _URL_EXT_RE.search(result.url)
+        if not m:
+            return result
+        ext = m.group(1).lower()
+        if ext not in _FYLE_FALLBACK_EXTS:
+            return result
+
+        # Lazy import: fyle pulls PDF/OCR/ASR toolchains and we want
+        # browse to boot fast. The PyPI package is ``fylepy``; the
+        # import name is ``fyle``. fylepy is a hard kros dependency so
+        # ImportError should not happen in a normal install — but we
+        # degrade gracefully if someone has dismantled it.
+        try:
+            import fyle  # type: ignore
+        except ImportError as e:
+            return result.model_copy(
+                update={
+                    "markdown": (
+                        f"(non-HTML resource at {result.url}; install "
+                        f"`fylepy` to parse it inline, or run "
+                        f"`kros read {result.url}` directly. {e})"
+                    )
+                }
+            )
+
+        try:
+            # fyle.read is sugar for str(fyle.open(url)) — returns an
+            # LLM-ready header + markdown for a URL in one call.
+            md = fyle.read(result.url)
+        except Exception as e:  # UnsupportedFormat / Parse / Download / ...
+            return result.model_copy(
+                update={
+                    "markdown": (
+                        f"(non-HTML resource at {result.url}; fyle "
+                        f"fallback failed: {type(e).__name__}: {e}. Try "
+                        f"`kros read {result.url}` directly.)"
+                    )
+                }
+            )
+
+        # Re-check the size budget: fyle documents (esp. transcripts /
+        # large PDFs) can easily exceed the 32 KiB markdown cap. Apply
+        # the same trim we do for the lightpanda branch.
+        truncated = result.truncated
+        if len(md.encode("utf-8")) > _READ_MARKDOWN_MAX_BYTES:
+            md = md.encode("utf-8")[:_READ_MARKDOWN_MAX_BYTES].decode(
+                "utf-8", errors="ignore"
+            )
+            truncated = True
+        return result.model_copy(update={"markdown": md, "truncated": truncated})
 
     def _try_restore(self, pre_url: str) -> bool:
         """Best-effort: put the tab back on pre_url after a failed nav.

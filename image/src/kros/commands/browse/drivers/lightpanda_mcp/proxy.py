@@ -24,7 +24,6 @@ from kros.commands.browse.contract import (
     FindResult,
     NavigationTimeoutError,
     NoSessionError,
-    PageState,
     ReadResult,
     SessionInfo,
     SessionExistsError,
@@ -109,10 +108,10 @@ class LightpandaMCPDriver(BrowseDriver):
         result = self._rpc("read", {"selector": selector})
         return ReadResult.model_validate(result)
 
-    def click(self, *, ref: int, timeout_ms: int = 5000) -> PageState:
+    def click(self, *, ref: int, timeout_ms: int = 5000) -> ReadResult:
         # IPC budget needs room for: click (fast) + fallback goto
-        # (timeout_ms) + best-effort restore (~10s) + slack.
-        return PageState.model_validate(
+        # (timeout_ms) + best-effort restore (~10s) + full read snapshot.
+        return ReadResult.model_validate(
             self._rpc(
                 "click",
                 {"ref": ref, "timeout_ms": timeout_ms},
@@ -120,8 +119,8 @@ class LightpandaMCPDriver(BrowseDriver):
             )
         )
 
-    def fill(self, *, ref: int, value: str) -> PageState:
-        return PageState.model_validate(
+    def fill(self, *, ref: int, value: str) -> ReadResult:
+        return ReadResult.model_validate(
             self._rpc("fill", {"ref": ref, "value": value})
         )
 
@@ -189,8 +188,8 @@ class LightpandaMCPDriver(BrowseDriver):
         ref: Optional[int] = None,
         x: Optional[int] = None,
         y: Optional[int] = None,
-    ) -> PageState:
-        return PageState.model_validate(
+    ) -> ReadResult:
+        return ReadResult.model_validate(
             self._rpc("scroll", {"ref": ref, "x": x, "y": y})
         )
 
@@ -199,21 +198,21 @@ class LightpandaMCPDriver(BrowseDriver):
 
     # --- tier 3 ------------------------------------------------------
 
-    def press(self, *, key: str, ref: Optional[int] = None) -> PageState:
-        return PageState.model_validate(
+    def press(self, *, key: str, ref: Optional[int] = None) -> ReadResult:
+        return ReadResult.model_validate(
             self._rpc("press", {"key": key, "ref": ref})
         )
 
-    def hover(self, *, ref: int) -> PageState:
-        return PageState.model_validate(self._rpc("hover", {"ref": ref}))
+    def hover(self, *, ref: int) -> ReadResult:
+        return ReadResult.model_validate(self._rpc("hover", {"ref": ref}))
 
-    def select(self, *, ref: int, value: str) -> PageState:
-        return PageState.model_validate(
+    def select(self, *, ref: int, value: str) -> ReadResult:
+        return ReadResult.model_validate(
             self._rpc("select", {"ref": ref, "value": value})
         )
 
-    def check(self, *, ref: int, checked: bool) -> PageState:
-        return PageState.model_validate(
+    def check(self, *, ref: int, checked: bool) -> ReadResult:
+        return ReadResult.model_validate(
             self._rpc("check", {"ref": ref, "checked": checked})
         )
 

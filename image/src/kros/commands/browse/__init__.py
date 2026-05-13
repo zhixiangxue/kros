@@ -242,7 +242,7 @@ def click_cmd(
     with _handle_errors():
         tid = _resolve_tab(tab)
         state = _driver(tid).click(ref=ref, timeout_ms=int(timeout * 1000))
-        _echo(formatting.format_page_state(_dump(state)))
+        _echo(formatting.format_read_result(_dump(state)))
 
 
 @browse_app.command("fill")
@@ -255,7 +255,7 @@ def fill_cmd(
     with _handle_errors():
         tid = _resolve_tab(tab)
         state = _driver(tid).fill(ref=ref, value=value)
-        _echo(formatting.format_page_state(_dump(state)))
+        _echo(formatting.format_read_result(_dump(state)))
 
 
 @browse_app.command("close")
@@ -380,7 +380,12 @@ def switch_cmd(
         raise typer.Exit(code=EXIT_BAD_INPUT)
     write_current_tab(tab)
     _echo(f"switched to tab {tab}")
-    _echo(formatting.format_session_info(_dump(info)))
+    # Mental model: switching a tab is like looking at that tab — the
+    # content should be visible immediately, without a separate `read`
+    # step. Snapshot the target tab and print its full state.
+    with _handle_errors():
+        result = _driver(tab).read()
+        _echo(formatting.format_read_result(_dump(result)))
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +455,7 @@ def scroll_cmd(
     with _handle_errors():
         tid = _resolve_tab(tab)
         state = _driver(tid).scroll(ref=ref, x=x, y=y)
-        _echo(formatting.format_page_state(_dump(state)))
+        _echo(formatting.format_read_result(_dump(state)))
 
 
 @browse_app.command("eval")
@@ -486,7 +491,7 @@ def press_cmd(
     with _handle_errors():
         tid = _resolve_tab(tab)
         state = _driver(tid).press(key=key, ref=ref)
-        _echo(formatting.format_page_state(_dump(state)))
+        _echo(formatting.format_read_result(_dump(state)))
 
 
 @browse_app.command("hover")
@@ -498,7 +503,7 @@ def hover_cmd(
     with _handle_errors():
         tid = _resolve_tab(tab)
         state = _driver(tid).hover(ref=ref)
-        _echo(formatting.format_page_state(_dump(state)))
+        _echo(formatting.format_read_result(_dump(state)))
 
 
 @browse_app.command("select")
@@ -511,7 +516,7 @@ def select_cmd(
     with _handle_errors():
         tid = _resolve_tab(tab)
         state = _driver(tid).select(ref=ref, value=value)
-        _echo(formatting.format_page_state(_dump(state)))
+        _echo(formatting.format_read_result(_dump(state)))
 
 
 @browse_app.command("check")
@@ -526,7 +531,7 @@ def check_cmd(
     with _handle_errors():
         tid = _resolve_tab(tab)
         state = _driver(tid).check(ref=ref, checked=checked)
-        _echo(formatting.format_page_state(_dump(state)))
+        _echo(formatting.format_read_result(_dump(state)))
 
 
 # ---------------------------------------------------------------------------
