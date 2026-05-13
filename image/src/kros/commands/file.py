@@ -1,13 +1,10 @@
-"""``kros file`` — local-file operations for agents.
+"""``kros file`` — file operations for agents.
 
 Currently one verb:
 
-- ``kros file read <path>`` — render any local document into LLM-ready
-  Markdown (filename + format + size header + content), backed by
-  `fyle <https://pypi.org/project/fyle/>`_.
-
-Only **local filesystem paths** are accepted. There is no URL support:
-for remote pages use ``kros browser open <url>`` instead.
+- ``kros file read <src>`` — render any document (local path or URL)
+  into LLM-ready Markdown (filename + format + size header + content),
+  backed by `fyle <https://pypi.org/project/fyle/>`_.
 """
 
 from __future__ import annotations
@@ -16,21 +13,26 @@ import typer
 import fyle
 
 
+_CATEGORIES = ", ".join(sorted(fyle.accepts()))
+
 file_app = typer.Typer(
-    help="Local-file operations (read).",
+    help=f"File operations (read). Supported: {_CATEGORIES}",
     no_args_is_help=True,
     add_completion=False,
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 
 
-@file_app.command("read", help="Read a local document into LLM-ready Markdown.")
+@file_app.command(
+    "read",
+    help=f"Read a document into LLM-ready Markdown. Supported: {_CATEGORIES}",
+)
 def read_cmd(
-    path: str = typer.Argument(..., help="Local path to the file."),
+    src: str = typer.Argument(..., help="Local file path or http(s) URL."),
 ) -> None:
-    """Render ``path`` into LLM-ready Markdown via fyle."""
+    """Render ``src`` into LLM-ready Markdown via fyle."""
     try:
-        doc = fyle.open(path)
+        doc = fyle.open(src)
     except FileNotFoundError as e:
         typer.secho(f"File not found: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
