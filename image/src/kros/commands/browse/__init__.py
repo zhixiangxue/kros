@@ -316,6 +316,19 @@ def close_cmd(
         _echo("closed.")
 
 
+@browse_app.command("reset")
+def reset_cmd() -> None:
+    """Close every tab — shortcut for ``close --all``.
+
+    Useful after a navigation failure (which auto-closes the affected
+    tab but leaves sibling tabs untouched) or any time you want a clean
+    slate before starting a new browsing task.
+    """
+    # Delegate to close_cmd's --all branch so there is a single source
+    # of truth for "tear everything down".
+    close_cmd(tab=None, all_tabs=True)
+
+
 @browse_app.command("info")
 def info_cmd(
     tab: Optional[int] = _tab_option(),

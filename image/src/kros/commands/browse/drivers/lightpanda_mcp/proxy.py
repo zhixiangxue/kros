@@ -109,15 +109,30 @@ class LightpandaMCPDriver(BrowseDriver):
         return ReadResult.model_validate(result)
 
     def click(self, *, ref: int, timeout_ms: int = 5000) -> ReadResult:
-        # IPC budget needs room for: click (fast) + fallback goto
-        # (timeout_ms) + best-effort restore (~10s) + full read snapshot.
-        return ReadResult.model_validate(
-            self._rpc(
+        # IPC budget needs room for: click + optional fallback goto
+        # (timeout_ms) + full read snapshot. No restore pass any more —
+        # failed navigations tear the tab down instead of leaving a
+        # half-broken DOM behind.
+        try:
+            result = self._rpc(
                 "click",
                 {"ref": ref, "timeout_ms": timeout_ms},
                 op_timeout_s=max(30.0, timeout_ms / 1000 + 20.0),
             )
-        )
+        except DriverError:
+            # Any navigation failure (timeout, goto error, unexpected
+            # about:blank) leaves the tab in an unrecoverable state —
+            # stale backendNodeIds, possibly blank DOM. Close the tab
+            # here so the agent gets a clean "session gone" signal and
+            # re-opens fresh, instead of inheriting a booby-trapped tab
+            # that fails every subsequent click with "Node is not an
+            # HTML element".
+            try:
+                self.close()
+            except Exception:
+                pass
+            raise
+        return ReadResult.model_validate(result)
 
     def fill(self, *, ref: int, value: str) -> ReadResult:
         return ReadResult.model_validate(

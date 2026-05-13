@@ -262,9 +262,11 @@ class LightpandaMCPEngine:
         if self._url in ("", "about:blank") and url not in ("", "about:blank"):
             raise NavigationTimeoutError(
                 f"open({url!r}) did not complete within {timeout_ms}ms "
-                f"(page still at {self._url!r}). Retry with a larger "
-                f"--timeout, or inspect ~/.kros/browse/tabs/*/daemon.log "
-                f"for network/engine errors."
+                f"(page still at {self._url!r}). This tab is now in "
+                f"an unrecoverable state and will be closed — re-open "
+                f"{url!r} with a larger --timeout, or inspect "
+                f"~/.kros/browse/tabs/*/daemon.log for network/engine "
+                f"errors."
             )
 
         # Return a full snapshot so the caller gets page content in one
@@ -344,10 +346,18 @@ class LightpandaMCPEngine:
         try:
             self._mcp.call("goto", {"url": target, "timeout": timeout_ms})
         except DriverError as e:
-            restored = self._try_restore(pre_url)
+            # Do not try to restore: any "rollback" would leave the tab
+            # in a silently-inconsistent state (about:blank or a half-
+            # loaded DOM) while reusing stale backendNodeIds, which
+            # lightpanda reports later as "Node is not an HTML element".
+            # Honest signal beats a best-effort rollback: the proxy
+            # layer will close this tab, and the agent re-opens fresh.
             raise DriverError(
                 f"click(ref={ref}): goto({target!r}) failed: {e}. "
-                f"Original page {'restored (refs are now stale — call `read` or `find` again)' if restored else 'could not be restored'}."
+                f"This tab is now in an unrecoverable state and will "
+                f"be closed — re-open {pre_url!r} (or a new url) to "
+                f"continue. If the resource isn't HTML, try "
+                f"`kros read {target}` directly."
             ) from e
 
         self._elements_by_ref.clear()
@@ -358,13 +368,12 @@ class LightpandaMCPEngine:
         # signals are location.href moving to about:blank, or the
         # markdown tool returning a "Navigation failed" notice.
         if self._navigation_failed(self._url):
-            restored = self._try_restore(pre_url)
             raise NavigationTimeoutError(
                 f"click(ref={ref}): navigation to {target!r} did not "
-                f"complete within {timeout_ms}ms. "
-                f"Original page {'restored (refs from before the click are now stale — call `read` or `find` again before clicking)' if restored else 'could not be restored'}. "
-                f"Retry with a larger --timeout, or try "
-                f"`kros read {target}` / `curl` if the resource "
+                f"complete within {timeout_ms}ms. This tab is now in "
+                f"an unrecoverable state and will be closed — re-open "
+                f"{pre_url!r} (or {target!r}) with a larger --timeout, "
+                f"or try `kros read {target}` / `curl` if the resource "
                 f"isn't HTML."
             )
         # Navigation succeeded — hand back a complete snapshot of the
@@ -571,41 +580,6 @@ class LightpandaMCPEngine:
             )
             truncated = True
         return result.model_copy(update={"markdown": md, "truncated": truncated})
-
-    def _try_restore(self, pre_url: str) -> bool:
-        """Best-effort: put the tab back on pre_url after a failed nav.
-
-        Returns True if the tab is safely back on pre_url (or was never
-        on a real page to begin with), False if lightpanda is now stuck
-        on something else (typically about:blank from the failed goto).
-        Caller uses this to word the error accurately.
-
-        Unconditionally clears ``_elements_by_ref``: any restore goto
-        rebuilds the DOM, which invalidates every backendNodeId from
-        the previous page. Reusing a stale ref surfaces as a confusing
-        ``Node is not an HTML element`` from lightpanda when the agent
-        retries the same click. The agent must call ``read`` or
-        ``find`` again to refresh refs before clicking.
-        """
-        # Clear first so even early-return paths (pre_url blank, engine
-        # errors mid-goto) leave the cache in a consistent invalidated
-        # state.
-        self._elements_by_ref.clear()
-
-        if not pre_url or pre_url == "about:blank":
-            self._url = pre_url
-            self._title = ""
-            return True
-        try:
-            # Restore uses a conservative, independent budget — the
-            # user's --timeout is for the *intended* navigation; we
-            # shouldn't blow a second copy of it on recovery.
-            self._mcp.call("goto", {"url": pre_url, "timeout": 10000})
-            self._refresh_state_from_eval(fallback_url=pre_url)
-            return not self._navigation_failed(self._url)
-        except DriverError:
-            log.warning("click fallback: could not restore page to %s", pre_url)
-            return False
 
 
 def _ensure_list(x: Any) -> list:
