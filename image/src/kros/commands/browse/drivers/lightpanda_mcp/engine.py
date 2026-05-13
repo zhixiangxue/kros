@@ -246,12 +246,16 @@ class LightpandaMCPEngine:
         )
 
     def click(self, *, ref: int) -> PageState:
-        return self._state_from(self._mcp.call("click", {"backendNodeId": ref}))
+        # lightpanda's click tool reply does not include url/title, and a
+        # click that triggers navigation must be observed via location.href —
+        # see _refresh_state_from_eval. Without this, click() leaves the
+        # cached _url stale and `list` keeps showing the old page.
+        self._mcp.call("click", {"backendNodeId": ref})
+        return self._refresh_state_from_eval()
 
     def fill(self, *, ref: int, value: str) -> PageState:
-        return self._state_from(
-            self._mcp.call("fill", {"backendNodeId": ref, "text": value})
-        )
+        self._mcp.call("fill", {"backendNodeId": ref, "text": value})
+        return self._refresh_state_from_eval()
 
     def close(self) -> None:
         self._mcp.close()
@@ -302,7 +306,8 @@ class LightpandaMCPEngine:
             args["x"] = x
         if y is not None:
             args["y"] = y
-        return self._state_from(self._mcp.call("scroll", args))
+        self._mcp.call("scroll", args)
+        return self._refresh_state_from_eval()
 
     def eval(self, *, script: str) -> str:
         res = self._mcp.call("evaluate", {"script": script})
@@ -316,26 +321,28 @@ class LightpandaMCPEngine:
         args: dict[str, Any] = {"key": key}
         if ref is not None:
             args["backendNodeId"] = ref
-        return self._state_from(self._mcp.call("press", args))
+        self._mcp.call("press", args)
+        return self._refresh_state_from_eval()
 
     def hover(self, *, ref: int) -> PageState:
-        return self._state_from(self._mcp.call("hover", {"backendNodeId": ref}))
+        self._mcp.call("hover", {"backendNodeId": ref})
+        return self._refresh_state_from_eval()
 
     def select(self, *, ref: int, value: str) -> PageState:
-        return self._state_from(
-            self._mcp.call("selectOption", {"backendNodeId": ref, "value": value})
-        )
+        self._mcp.call("selectOption", {"backendNodeId": ref, "value": value})
+        return self._refresh_state_from_eval()
 
     def check(self, *, ref: int, checked: bool) -> PageState:
-        return self._state_from(
-            self._mcp.call(
-                "setChecked", {"backendNodeId": ref, "checked": checked}
-            )
-        )
+        self._mcp.call("setChecked", {"backendNodeId": ref, "checked": checked})
+        return self._refresh_state_from_eval()
 
     # --- helpers ------------------------------------------------------
 
     def _state_from(self, res: Any) -> PageState:
+        # Retained for backward-compat with callers that expect a
+        # PageState built purely from a tool response. New mutating ops
+        # should prefer _refresh_state_from_eval — lightpanda tool
+        # replies are unreliable about including url/title (see click).
         if isinstance(res, dict):
             url = res.get("url")
             title = res.get("title")
