@@ -368,6 +368,33 @@ class LightpandaMCPEngine:
         # signals are location.href moving to about:blank, or the
         # markdown tool returning a "Navigation failed" notice.
         if self._navigation_failed(self._url):
+            # Before giving up, try fyle: lightpanda can't load this
+            # resource, but if it's a whitelisted non-HTML format
+            # (PDF/Office/image/audio/video/CSV/SQLite/archive) fyle
+            # can fetch and parse it by URL. This fulfils the click
+            # mental model — "show me what I just clicked" — even
+            # when lightpanda couldn't render it. The tab's engine
+            # state stays honestly blank; the returned ReadResult
+            # carries the fyle-parsed content under url=target so the
+            # agent sees exactly what it clicked.
+            fallback = self._maybe_fyle_fallback(
+                ReadResult(
+                    url=target,
+                    title="",
+                    markdown="",
+                    elements=[],
+                    truncated=False,
+                )
+            )
+            # Distinguish a real fyle success (parsed document content)
+            # from fyle's own failure/unavailable sentinel strings,
+            # which _maybe_fyle_fallback writes with the "(non-HTML"
+            # prefix. On real success we keep the tab alive and return
+            # the content; on fyle failure we fall through to raise so
+            # the tab self-destructs rather than masquerading as usable.
+            md = fallback.markdown
+            if md and not md.lstrip().startswith("(non-HTML"):
+                return fallback
             raise NavigationTimeoutError(
                 f"click(ref={ref}): navigation to {target!r} did not "
                 f"complete within {timeout_ms}ms. This tab is now in "
