@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-kros = "kros.cli:app"
+kros = "kros.cli:main"
 
 [build-system]
 requires = ["hatchling"]
