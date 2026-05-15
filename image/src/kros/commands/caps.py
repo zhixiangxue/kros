@@ -75,25 +75,25 @@ Examples:
 Tab model: open creates a new tab (auto-current); all other commands target the current tab by default.
 Use --tab N to target a specific tab without switching.
 
-Core commands (Tier 1):
+Navigation & lifecycle:
   open <url> [--timeout N]         Open URL in a new tab, return full page snapshot
-  read [--tab N]                   Snapshot current page (URL, title, markdown, elements)
-  click --ref N [--timeout N]      Click element by ref, return updated page
-  fill --ref N --value "text"      Type into input field
   close [--tab N | --all]          Close tab(s)
   info [--tab N]                   Show tab state (alive/url/title/driver)
 
-High-value commands (Tier 2):
+Reading & locating:
+  read [--tab N]                   Snapshot current page (URL, title, markdown, elements)
   find --role X [--name Y]         Locate elements by ARIA role/name
   wait --selector "css" [--timeout-ms N]  Block until element appears in DOM
-  scroll --ref N | --y N           Scroll element into view or page by pixels
   eval --script "js code"          Execute JavaScript, return stringified result
 
-Completion commands (Tier 3):
+Interaction:
+  click --ref N [--timeout N]      Click element by ref, return updated page
+  fill --ref N --value "text"      Type into input field
   press --key "Enter" [--ref N]    Send keypress
   hover --ref N                    Hover over element
   select --ref N --value "opt"     Pick dropdown option
   check --ref N --checked true     Set checkbox/radio state
+  scroll --ref N | --y N           Scroll element into view or page by pixels
 
 Tab management:
   list                             List all live tabs (* = current)

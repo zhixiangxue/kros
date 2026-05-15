@@ -92,6 +92,20 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     KROS_SANDBOX_RUNTIME=bubblewrap \
     KROS_BROWSER_LIGHTPANDA_BIN=/usr/local/bin/lightpanda
 
+# ---------------------------------------------------------------------------
+# Agent bootstrap — dual-channel capability discovery.
+#
+# Channel 1 (主动推): /etc/profile.d/kros.sh fires on first shell open, so
+#   any agent naturally sees kros exists without prior knowledge.
+# Channel 2 (被动拉): /etc/kros/system-prompt.md + `kros caps` command, for
+#   frameworks that explicitly inject capabilities into system prompts.
+# ---------------------------------------------------------------------------
+COPY kros-motd.sh /etc/profile.d/kros.sh
+RUN mkdir -p /etc/kros \
+    && kros caps > /etc/kros/system-prompt.md \
+    && echo '. /etc/profile.d/kros.sh' >> /etc/bash.bashrc
+ENV KROS_SYSTEM_PROMPT=/etc/kros/system-prompt.md
+
 # /workspace is a conventional bind-mount target so agents can `cd` into
 # caller-supplied files without colliding with kros internals under /app.
 WORKDIR /workspace
