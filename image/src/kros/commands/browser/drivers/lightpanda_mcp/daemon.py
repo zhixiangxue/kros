@@ -31,8 +31,8 @@ import sys
 import threading
 from typing import Any
 
-from kros.commands.browser._tabs import tab_dir
-from kros.commands.browser.contract import (
+from ..._tabs import tab_dir
+from ...contract import (
     OP_SHUTDOWN,
     VALID_OPS,
     DriverError,

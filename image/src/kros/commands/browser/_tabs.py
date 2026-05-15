@@ -50,7 +50,7 @@ import os
 from pathlib import Path
 from typing import Iterator, Optional
 
-from kros.commands.browser.contract import DEFAULT_RUNTIME_SUBDIR, ENV_RUNTIME_DIR
+from .contract import DEFAULT_RUNTIME_SUBDIR, ENV_RUNTIME_DIR
 
 # Top-level files under runtime_dir() that aren't part of the per-tab layout.
 _COUNTER_BASENAME = "counter"

@@ -40,22 +40,22 @@ from typing import Any, Iterator, Optional
 
 import typer
 
-from kros.commands.browser import formatting
-from kros.commands.browser._tabs import (
+from . import formatting
+from ._tabs import (
     allocate_next_tab_id,
     list_tab_ids,
     read_current_tab,
     tab_dir,
     write_current_tab,
 )
-from kros.commands.browser.contract import (
+from .contract import (
     BrowseDriver,
     DriverError,
     NavigationTimeoutError,
     NoSessionError,
     SessionExistsError,
 )
-from kros.commands.browser.drivers import get_driver
+from .drivers import get_driver
 
 
 browser_app = typer.Typer(

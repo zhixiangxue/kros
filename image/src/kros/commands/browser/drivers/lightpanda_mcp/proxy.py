@@ -18,7 +18,7 @@ import socket
 import time
 from typing import Any, Optional
 
-from kros.commands.browser.contract import (
+from ...contract import (
     BrowseDriver,
     DriverError,
     FindResult,

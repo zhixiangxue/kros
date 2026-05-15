@@ -18,7 +18,7 @@ import subprocess
 import threading
 from typing import Any, Optional
 
-from kros.commands.browser.contract import (
+from ...contract import (
     ENV_LIGHTPANDA_BIN,
     DriverError,
     Element,

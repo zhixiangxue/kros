@@ -12,10 +12,10 @@ import importlib
 import os
 from typing import TYPE_CHECKING, Optional
 
-from kros.commands.browser.contract import ENV_DRIVER
+from ..contract import ENV_DRIVER
 
 if TYPE_CHECKING:
-    from kros.commands.browser.contract import BrowseDriver
+    from ..contract import BrowseDriver
 
 
 # driver name → "module:class" lazy import path

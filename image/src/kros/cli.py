@@ -17,12 +17,12 @@ from pathlib import Path
 import typer
 from dotenv import load_dotenv
 
-from kros import _audit
-from kros.commands import browser as browser_cmd
-from kros.commands import file as file_cmd
-from kros.commands import memory as memory_cmd
-from kros.commands import sandbox as sandbox_cmd
-from kros.commands import shell as shell_cmd
+from . import _audit
+from .commands import browser as browser_cmd
+from .commands import file as file_cmd
+from .commands import memory as memory_cmd
+from .commands import sandbox as sandbox_cmd
+from .commands import shell as shell_cmd
 
 # Fill in missing KROS_* / provider env vars from the user-level dotenv
 # file, but never override what the shell / container already set.

@@ -21,6 +21,7 @@ Design choices (see design/03-kros-audit-and-log.md):
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -28,7 +29,7 @@ from typing import Optional
 
 import typer
 
-from kros import _audit
+from ... import _audit
 
 from ._unwrap import dispatch_inline, looks_like_kros_nested
 
@@ -141,6 +142,10 @@ def _spawn_and_wait(
             cwd=cwd,
             env=env,
             bufsize=0,
+            # Put the child in its own session/process group so we can kill
+            # the whole tree on timeout — backgrounded grandchildren
+            # (``sleep 100 & wait``) would otherwise outlive us.
+            start_new_session=True,
         )
     except FileNotFoundError:
         typer.secho(
@@ -163,10 +168,25 @@ def _spawn_and_wait(
     # the child to wind down so the command exits promptly while audit
     # still gets whatever made it into the buffer.
     def _on_broken_pipe() -> None:
-        try:
-            proc.terminate()
-        except ProcessLookupError:
-            pass
+        _signal_pgroup(proc, signal.SIGTERM)
+
+    # We moved the child into its own session, which severs the controlling
+    # tty link. Without explicit forwarding, Ctrl+C at the user's terminal
+    # would only hit kros, leaving the child running. Forward SIGINT and
+    # SIGTERM to the whole child process group so behavior matches a plain
+    # ``bash -c`` invocation.
+    _prev_sigint = signal.getsignal(signal.SIGINT)
+    _prev_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def _forward(sig, _frame):  # pragma: no cover — signal-driven
+        _signal_pgroup(proc, sig)
+
+    try:
+        signal.signal(signal.SIGINT, _forward)
+        signal.signal(signal.SIGTERM, _forward)
+    except ValueError:
+        # Not running on the main thread (e.g. unit tests) — best effort.
+        pass
 
     t_out = threading.Thread(
         target=_pump,
@@ -185,10 +205,19 @@ def _spawn_and_wait(
 
     timed_out = False
     try:
-        proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        _terminate_with_grace(proc)
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            _terminate_with_grace(proc)
+    finally:
+        # Restore previous handlers no matter what — leaving _forward
+        # installed would mishandle later signals during shutdown.
+        try:
+            signal.signal(signal.SIGINT, _prev_sigint)
+            signal.signal(signal.SIGTERM, _prev_sigterm)
+        except (ValueError, TypeError):
+            pass
 
     # Join pumps so the buffers are complete before we hand them to audit.
     t_out.join(timeout=1.0)
@@ -233,19 +262,34 @@ def _pump(reader, writer, buf: bytearray, on_broken=None) -> None:
         pass
 
 
-def _terminate_with_grace(proc: subprocess.Popen) -> None:
-    """SIGTERM → wait grace period → SIGKILL."""
+def _signal_pgroup(proc: subprocess.Popen, sig: int) -> None:
+    """Send ``sig`` to the child's process group, falling back to the child.
+
+    The child was launched with ``start_new_session=True``, so it is the
+    leader of its own pgroup. ``killpg`` reaches every backgrounded
+    grandchild (e.g. ``sleep 100 & wait``); a plain ``proc.terminate()``
+    would only hit bash and leave the grandchildren as init's orphans.
+    """
     try:
-        proc.terminate()
-    except ProcessLookupError:
+        pgid = os.getpgid(proc.pid)
+        os.killpg(pgid, sig)
         return
+    except (ProcessLookupError, PermissionError, OSError):
+        # pgid lookup failed (race) or no permission — fall back.
+        pass
+    try:
+        proc.send_signal(sig)
+    except ProcessLookupError:
+        pass
+
+
+def _terminate_with_grace(proc: subprocess.Popen) -> None:
+    """SIGTERM → wait grace period → SIGKILL (whole pgroup, not just bash)."""
+    _signal_pgroup(proc, signal.SIGTERM)
     try:
         proc.wait(timeout=_GRACE_SECS)
     except subprocess.TimeoutExpired:
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            return
+        _signal_pgroup(proc, signal.SIGKILL)
         try:
             proc.wait(timeout=2.0)
         except subprocess.TimeoutExpired:

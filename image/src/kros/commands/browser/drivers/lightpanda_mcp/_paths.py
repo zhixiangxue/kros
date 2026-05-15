@@ -14,8 +14,8 @@ from __future__ import annotations
 import socket
 from pathlib import Path
 
-from kros.commands.browser._tabs import tab_dir
-from kros.commands.browser.contract import (
+from ..._tabs import tab_dir
+from ...contract import (
     DAEMON_LOG_BASENAME,
     PID_BASENAME,
     SOCKET_BASENAME,
