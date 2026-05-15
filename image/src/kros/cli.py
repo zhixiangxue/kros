@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 from . import _audit
 from .commands import browser as browser_cmd
 from .commands import file as file_cmd
+from .commands import http as http_cmd
 from .commands import memory as memory_cmd
 from .commands import sandbox as sandbox_cmd
 from .commands import shell as shell_cmd
@@ -54,6 +55,7 @@ memory_cmd.register(app)
 sandbox_cmd.register(app)
 browser_cmd.register(app)
 shell_cmd.register(app)
+http_cmd.register(app)
 
 
 def main() -> None:

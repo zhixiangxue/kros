@@ -86,12 +86,15 @@ _current: Optional[AuditState] = None
 def should_skip(argv: list[str]) -> bool:
     """Return True if this invocation should not be logged.
 
-    - ``KROS_AUDIT_DISABLED=1`` master switch (§13 Q5)
-    - ``-h`` / ``--help`` anywhere in argv
-    - first positional subcommand is ``log`` (read-only meta, §3)
+    Audit is a *non-negotiable* core promise of kros — there is no
+    environment-variable kill switch by design. We only skip the two
+    cases that would otherwise pollute the ledger with non-events:
+
+    - ``-h`` / ``--help`` anywhere in argv (the user is reading docs,
+      not executing anything)
+    - first positional subcommand is ``log`` (read-only meta command —
+      reading the ledger should not append to it, §3)
     """
-    if os.environ.get("KROS_AUDIT_DISABLED") == "1":
-        return True
     if any(a in ("-h", "--help") for a in argv):
         return True
     # First token after the program name that doesn't start with '-'
