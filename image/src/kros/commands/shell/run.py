@@ -122,6 +122,17 @@ def _spawn_and_wait(
     timeout: Optional[float],
 ) -> int:
     """Run bash -c CMD, tee output, enforce timeout, return exit code."""
+    # Pre-validate --cwd. Without this, a missing cwd would surface as a
+    # FileNotFoundError from Popen indistinguishable from /bin/bash being
+    # absent, leading to a misleading "bash not found" error line.
+    if cwd is not None and not os.path.isdir(cwd):
+        typer.secho(
+            f"kros: --cwd not a directory: {cwd}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        return 126
+
     try:
         proc = subprocess.Popen(
             ["/bin/bash", "-c", cmd],
@@ -144,14 +155,29 @@ def _spawn_and_wait(
 
     out_buf = bytearray()
     err_buf = bytearray()
+
+    # If the downstream tty/pipe (e.g. ``kros shell run ... | head``) closes
+    # while the child is still streaming, the original implementation kept
+    # buffering forever — for unbounded producers (``yes``, infinite logs)
+    # that meant unbounded memory growth and an apparent hang. Now we ask
+    # the child to wind down so the command exits promptly while audit
+    # still gets whatever made it into the buffer.
+    def _on_broken_pipe() -> None:
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            pass
+
     t_out = threading.Thread(
         target=_pump,
         args=(proc.stdout, sys.stdout.buffer, out_buf),
+        kwargs={"on_broken": _on_broken_pipe},
         daemon=True,
     )
     t_err = threading.Thread(
         target=_pump,
         args=(proc.stderr, sys.stderr.buffer, err_buf),
+        kwargs={"on_broken": _on_broken_pipe},
         daemon=True,
     )
     t_out.start()
@@ -175,21 +201,33 @@ def _spawn_and_wait(
     return int(proc.returncode or 0)
 
 
-def _pump(reader, writer, buf: bytearray) -> None:
-    """Tee ``reader`` → (``writer`` + ``buf``) until EOF."""
+def _pump(reader, writer, buf: bytearray, on_broken=None) -> None:
+    """Tee ``reader`` → (``writer`` + ``buf``) until EOF.
+
+    If the downstream ``writer`` raises ``BrokenPipeError`` (e.g. user piped
+    us into ``head``), stop tee'ing — keep filling ``buf`` so audit still
+    has whatever the child emits next — and invoke ``on_broken`` once so
+    the caller can wind down the child instead of buffering forever.
+    """
     try:
         while True:
             chunk = reader.read(_PUMP_CHUNK)
             if not chunk:
                 break
+            buf.extend(chunk)
+            if writer is None:
+                continue
             try:
                 writer.write(chunk)
                 writer.flush()
             except (BrokenPipeError, ValueError):
-                # tty closed (e.g. user piped to ``head``); keep buffering
-                # so the ledger still sees the full output.
-                pass
-            buf.extend(chunk)
+                # Downstream is gone. Don't keep raising every chunk.
+                writer = None
+                if on_broken is not None:
+                    try:
+                        on_broken()
+                    except Exception:
+                        pass
     except Exception:
         # Never let a pump thread crash the parent.
         pass
