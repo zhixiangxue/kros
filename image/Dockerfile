@@ -14,7 +14,7 @@
 #   docker build -t kros:dev ./image
 #   docker build -t kros:dev --build-arg LIGHTPANDA_VERSION=nightly ./image
 
-ARG PYTHON_VERSION=3.11
+ARG PYTHON_VERSION=3.12
 ARG LIGHTPANDA_VERSION=nightly
 
 # ---------------------------------------------------------------------------
