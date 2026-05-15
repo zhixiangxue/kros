@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# kros — host-side launcher for the Kros agent OS container.
+#
+# Sole subcommand: `kros run <script> [options] [-- script-args...]`
+#
+# Semantics:
+#   - <script> is mounted into the container at /entrypoint (read-only).
+#   - Container runs it via bash. Exit code is propagated.
+#   - Anything else the script needs (source code, configs, secrets) must
+#     be declared EXPLICITLY by the developer via -v / -e flags. There is
+#     no implicit mounting of the script's parent directory.
+#
+# This is a thin wrapper around `docker run`. The mental model matches
+# `docker run -v ... -e ... <image> <cmd>` exactly.
+
+set -eo pipefail
+
+DEFAULT_IMAGE="zeitro/kros:latest"
+
+print_usage() {
+    cat <<'EOF'
+kros — host-side launcher for the Kros agent OS container.
+
+USAGE:
+  kros run <script> [options] [-- script-args...]
+
+ARGUMENTS:
+  <script>            Path to a host-side shell script. ONLY this file is
+                      mounted into the container (at /entrypoint).
+
+OPTIONS:
+  --image TAG         Kros image to use (default: zeitro/kros:latest)
+  -v HOST:CTR[:opts]  Mount additional host path into the container (repeatable)
+  -e KEY[=VAL]        Pass an environment variable (repeatable)
+  -h, --help          Show this help
+
+EXAMPLES:
+  # Minimal: a self-contained script
+  kros run ./bootstrap.sh
+
+  # Mount your project directory + pass an API key
+  kros run ./bootstrap.sh -v ./my-agent:/work -e OPENAI_API_KEY
+
+  # Pin a specific image version
+  kros run ./bootstrap.sh --image zeitro/kros:0.1.0
+
+  # Pass arguments through to the script itself
+  kros run ./bootstrap.sh -- --my-flag foo bar
+EOF
+}
+
+die() {
+    echo "kros: $*" >&2
+    exit 2
+}
+
+# --- precondition
+command -v docker >/dev/null 2>&1 || die "docker not found in PATH. Install Docker first."
+
+# --- subcommand routing
+if [ $# -eq 0 ]; then
+    print_usage
+    exit 1
+fi
+
+case "$1" in
+    -h|--help) print_usage; exit 0 ;;
+    run)       shift ;;
+    *)         die "unknown command: $1 (only 'run' is supported, see 'kros --help')" ;;
+esac
+
+# --- parse `run` arguments
+SCRIPT=""
+IMAGE="$DEFAULT_IMAGE"
+DOCKER_VOLUMES=()
+DOCKER_ENVS=()
+SCRIPT_ARGS=()
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --image)
+            [ $# -ge 2 ] || die "--image requires a value"
+            IMAGE="$2"; shift 2 ;;
+        --image=*)
+            IMAGE="${1#--image=}"; shift ;;
+        -v)
+            [ $# -ge 2 ] || die "-v requires a value"
+            DOCKER_VOLUMES+=("-v" "$2"); shift 2 ;;
+        -e)
+            [ $# -ge 2 ] || die "-e requires a value"
+            DOCKER_ENVS+=("-e" "$2"); shift 2 ;;
+        -h|--help)
+            print_usage; exit 0 ;;
+        --)
+            shift
+            SCRIPT_ARGS=("$@")
+            break ;;
+        -*)
+            die "unknown option: $1" ;;
+        *)
+            if [ -z "$SCRIPT" ]; then
+                SCRIPT="$1"
+            else
+                SCRIPT_ARGS+=("$1")
+            fi
+            shift ;;
+    esac
+done
+
+[ -n "$SCRIPT" ] || die "missing <script> argument. See 'kros --help'."
+[ -f "$SCRIPT" ] || die "script not found: $SCRIPT"
+
+# Resolve to absolute path (realpath is GNU coreutils; fallback for macOS sans coreutils)
+if command -v realpath >/dev/null 2>&1; then
+    SCRIPT_ABS=$(realpath "$SCRIPT")
+else
+    SCRIPT_ABS="$(cd "$(dirname "$SCRIPT")" && pwd)/$(basename "$SCRIPT")"
+fi
+
+# --- TTY: attach interactive flags only when both stdin and stdout are TTYs.
+# This makes `kros run` Ctrl-C-friendly when used by a human, and pipe-safe
+# when used by an agent's subprocess.
+TTY_FLAG=()
+if [ -t 0 ] && [ -t 1 ]; then
+    TTY_FLAG=("-it")
+fi
+
+# --- exec docker. Empty-array expansion is safe under bash 4+.
+exec docker run --rm \
+    "${TTY_FLAG[@]}" \
+    -v "$SCRIPT_ABS:/entrypoint:ro" \
+    "${DOCKER_VOLUMES[@]}" \
+    "${DOCKER_ENVS[@]}" \
+    --entrypoint bash \
+    "$IMAGE" \
+    /entrypoint \
+    "${SCRIPT_ARGS[@]}"
