@@ -20,12 +20,13 @@ from __future__ import annotations
 
 import json
 import os
-import secrets
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+from nanoid import generate as _nanoid_generate
 
 __all__ = [
     "AuditState",
@@ -46,9 +47,11 @@ __all__ = [
 _SPILL_BYTES = int(os.environ.get("KROS_LOG_SPILL_BYTES", 64 * 1024))
 _PREVIEW_BYTES = 2 * 1024
 
-# Crockford Base32 — ULID standard alphabet. Monotonic-enough for our
-# needs: 48-bit ms timestamp prefix means lexical sort ≈ time sort.
-_CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+# Length of the nanoid we hand out as the audit record ``id``. 21 chars
+# is the nanoid default and gives ~149 bits of entropy — collision-free
+# at any realistic kros invocation rate. We rely on the ``ts`` field
+# (not the id) for time-ordering, so a random id is fine here.
+_ID_LEN = 21
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +111,7 @@ def before(argv: list[str]) -> AuditState:
     global _current
     skip = should_skip(argv)
     state = AuditState(
-        id=_ulid() if not skip else "",
+        id=_new_id() if not skip else "",
         ts=_iso_utc_now(),
         subcmd=_infer_subcmd(argv),
         argv=list(argv),
@@ -179,16 +182,9 @@ def rewrite_argv(new_argv: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _ulid() -> str:
-    """26-char Crockford Base32 ULID (48b ms time + 80b random)."""
-    ts_ms = int(time.time() * 1000) & ((1 << 48) - 1)
-    rand = int.from_bytes(secrets.token_bytes(10), "big")
-    n = (ts_ms << 80) | rand
-    out = []
-    for _ in range(26):
-        out.append(_CROCKFORD[n & 0x1F])
-        n >>= 5
-    return "".join(reversed(out))
+def _new_id() -> str:
+    """Random 21-char URL-safe id via nanoid (default alphabet/length)."""
+    return _nanoid_generate(size=_ID_LEN)
 
 
 def _iso_utc_now() -> str:

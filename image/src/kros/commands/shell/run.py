@@ -227,7 +227,15 @@ def _spawn_and_wait(
 
     if timed_out:
         return _EXIT_TIMEOUT
-    return int(proc.returncode or 0)
+    rc = proc.returncode or 0
+    # bash convention: a child killed by signal N exits with 128 + N.
+    # Python's subprocess instead reports the negative signum (-N), which
+    # would surface as 256-N (e.g. 247 for SIGKILL) once Linux truncates
+    # the negative number through ``sys.exit``. Translate so callers and
+    # the audit record see the same number ``bash -c`` would.
+    if rc < 0:
+        rc = 128 + (-rc)
+    return int(rc)
 
 
 def _pump(reader, writer, buf: bytearray, on_broken=None) -> None:
