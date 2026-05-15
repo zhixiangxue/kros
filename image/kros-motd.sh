@@ -12,7 +12,7 @@
 if [ ! -f /tmp/.kros-introduced ]; then
     cat <<'KROS_MOTD'
 
-════════════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════════════════════════════
   Kros — Agent Operating System
 
   You have 7 superpowers beyond raw bash:
@@ -28,7 +28,7 @@ if [ ! -f /tmp/.kros-introduced ]; then
   Run `kros caps` for the complete reference with flags, exit codes, and examples.
   Or read /etc/kros/system-prompt.md
 
-════════════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════════════════════════════
 
 KROS_MOTD
     touch /tmp/.kros-introduced

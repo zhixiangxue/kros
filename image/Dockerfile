@@ -104,7 +104,8 @@ COPY kros-motd.sh /etc/profile.d/kros.sh
 RUN mkdir -p /etc/kros \
     && kros caps > /etc/kros/system-prompt.md \
     && echo '. /etc/profile.d/kros.sh' >> /etc/bash.bashrc
-ENV KROS_SYSTEM_PROMPT=/etc/kros/system-prompt.md
+ENV KROS_SYSTEM_PROMPT=/etc/kros/system-prompt.md \
+    BASH_ENV=/etc/profile.d/kros.sh
 
 # /workspace is a conventional bind-mount target so agents can `cd` into
 # caller-supplied files without colliding with kros internals under /app.
