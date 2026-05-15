@@ -6,7 +6,7 @@
 [![Platform](https://img.shields.io/badge/platform-linux%2Famd64-lightgrey.svg)](#)
 [![Docker](https://img.shields.io/badge/runtime-Docker-blue.svg)](https://www.docker.com/)
 
-**Self-contained. Framework-free. Agent-ready.**
+**An agent-friendly operating system.**
 
 An operating system for LLM agents — shipped as a single Docker image.
 
@@ -16,13 +16,22 @@ An operating system for LLM agents — shipped as a single Docker image.
 
 ## What is KROS?
 
-A Docker image that gives any LLM agent **LLM-friendly CLI superpowers** —
-plus a 30-line bash launcher on the host.
+LLM agent today runs on an operating system designed for humans.
+Bash was built for humans typing at a terminal. Browsers were built for
+humans clicking around. PDFs, Word, Excel — designed for humans to skim
+visually, etc. The whole stack assumes a human in the loop —
+and agents have been forced to pretend they're one ever since.
 
-- **Inside the image**: structured HTTP, headless browser, universal file reader, persistent memory, audited shell, sandboxed execution, audit log.
-- **Outside the image**: `kros run <your-script>` — a thin wrapper around `docker run`.
+**KROS is the first OS built the other way around: for agents.**
 
-> No framework lock-in. No SDK to import. Any agent that can run a shell can use kros.
+Inside the image, every CLI is shaped by how an LLM thinks — semantic
+exit codes, JSON-first I/O, deterministic errors. The current set covers
+the essentials an agent can't live without: structured HTTP, headless
+browser, universal file reader, persistent memory, audited shell,
+sandboxed execution, audit log. More will follow — all sharing the same
+agent-first ergonomics.
+
+> Bring any framework. Pass any LLM. Your agent finally has a home.
 
 ---
 
@@ -64,7 +73,7 @@ kros run ./my-agent.sh \
 
 That's it. Once the LLM sees the manifest in its system prompt, it will
 shell out to `kros http`, `kros browse`, `kros file`, ... on its own —
-no SDK, no framework integration, no kros-specific code in your agent.
+no SDK, no framework integration, no KROS-specific code in your agent.
 
 ---
 
