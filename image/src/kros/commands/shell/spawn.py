@@ -14,11 +14,12 @@ Differs from :mod:`kros.commands.shell.run` along two axes:
 
 The wrapper:
 
-    timeout --preserve-status <SECS>s bash -c '<USER_CMD>'; echo $? > <task_dir>/exit_code
+    timeout <SECS>s bash -c '<USER_CMD>'; echo $? > <task_dir>/exit_code
 
-* ``timeout --preserve-status`` keeps the user's real exit code on
-  normal exit; if the timer fires it sends SIGTERM (then SIGKILL after
-  a coreutils-default grace) and exits 124 (GNU convention).
+* Without ``--preserve-status``, ``timeout`` returns exit code 124 when
+  the timer fires — this is what makes ``jobs`` report the state as
+  ``killed_by_timeout``. On normal exit it passes through the user's
+  real exit code unchanged.
 * The trailing ``echo $? > exit_code`` is what makes ``jobs`` /
   ``logs`` work after the kros CLI is long gone — see design/04 §7.
 """
@@ -207,7 +208,7 @@ def _build_wrapper(user_cmd: str, timeout_sec: float, exit_code_path) -> str:
     else:
         timeout_str = f"{timeout_sec}s"
 
-    inner = f"timeout --preserve-status {shlex.quote(timeout_str)} bash -c {shlex.quote(user_cmd)}"
+    inner = f"timeout {shlex.quote(timeout_str)} bash -c {shlex.quote(user_cmd)}"
     return f"{inner}; echo $? > {shlex.quote(str(exit_code_path))}"
 
 

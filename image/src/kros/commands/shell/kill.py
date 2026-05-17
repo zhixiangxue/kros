@@ -89,6 +89,13 @@ def kill_cmd(
     pid = int(meta.get("pid") or 0)
     killed, reason = _send_signal(pgid, pid, sig)
 
+    # When killpg succeeds, the entire process group — including the
+    # wrapper bash that would normally write exit_code — is gone.
+    # We land the exit_code file ourselves so jobs/logs see "exited"
+    # instead of "lost".
+    if killed:
+        _land_exit_code(task_id, sig)
+
     payload = {
         "task_id": task_id,
         "killed": killed,
@@ -157,3 +164,22 @@ def _signal_name(sig: int) -> str:
         return signal_mod.Signals(sig).name
     except ValueError:
         return f"signal_{sig}"
+
+
+def _land_exit_code(task_id: str, sig: int) -> None:
+    """Write the exit_code file after a successful kill.
+
+    The wrapper bash would have written this, but killpg killed the
+    whole group before it could. We use bash convention: 128 + signum.
+    Give the process group a moment to actually terminate before writing,
+    so there's no race between the OS teardown and our file creation.
+    """
+    import time
+    time.sleep(0.3)
+    exit_code_path = JobsStore.task_dir(task_id) / "exit_code"
+    if not exit_code_path.exists():
+        code = 128 + sig
+        try:
+            exit_code_path.write_text(str(code), encoding="utf-8")
+        except OSError:
+            pass
