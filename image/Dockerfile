@@ -71,10 +71,14 @@ FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim-bookworm AS runtime
 # ca-certificates: outbound HTTPS for memory/browser.
 # curl: only used by this stage to fetch the lightpanda binary; kept
 # because `kros browser` tooling and user troubleshooting benefits from it.
+# tini: PID 1 zombie reaper. `kros shell spawn` detaches tasks from the
+# kros CLI's session, so when those tasks exit they would otherwise
+# linger as <defunct> under PID 1 (see design/04 §8). tini reaps them.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bubblewrap \
         ca-certificates \
         curl \
+        tini \
     && rm -rf /var/lib/apt/lists/*
 
 # Pull lightpanda binary from GitHub release. Only amd64 is published.
@@ -111,5 +115,5 @@ ENV KROS_SYSTEM_PROMPT=/etc/kros/system-prompt.md \
 # caller-supplied files without colliding with kros internals under /app.
 WORKDIR /workspace
 
-ENTRYPOINT ["kros"]
+ENTRYPOINT ["/usr/bin/tini", "--", "kros"]
 CMD ["--help"]

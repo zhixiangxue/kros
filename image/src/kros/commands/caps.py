@@ -141,6 +141,95 @@ Examples:
   kros shell run 'curl -s $API_URL' --env API_URL=https://example.com""",
     },
     {
+        "name": "kros shell spawn <cmd>",
+        "summary": "Dispatch a long-running command asynchronously. Returns a task_id immediately.",
+        "body": """\
+Use spawn for background services, long builds, or any task where you don't
+want to block the conversation. Query results with `jobs`, `logs`, `kill`.
+
+Key flags:
+  --cwd <path>       Working directory (default: inherit from caller)
+  --env/-e KEY=VAL   Extra environment variable (repeatable)
+  --timeout/-t <sec> Auto-kill after N seconds (default 600). State becomes "killed_by_timeout"
+
+stdout JSON (returned immediately):
+  {"task_id": "t_9x82f1", "pid": 412, "started_at": "...", "timeout_sec": 600}
+
+Exit codes:
+  0  Task spawned successfully
+  126 = spawn failed (OS error)
+  127 = /bin/bash not found
+
+Examples:
+  kros shell spawn 'python app.py --port 8080'
+  kros shell spawn --timeout 60 'pytest tests/'
+  kros shell spawn --cwd /project --env PORT=3000 'npm start'""",
+    },
+    {
+        "name": "kros shell jobs [TASK_ID]",
+        "summary": "List async tasks spawned by `kros shell spawn`. NOT a wrapper of system `ps`.",
+        "body": """\
+Shows only kros-managed tasks. To inspect system processes use `kros shell run 'ps -ef'`.
+
+Key flags:
+  --state <str>   Filter by state: running / exited / killed_by_timeout / lost
+
+State values (closed set):
+  running            Task is alive
+  exited             Task finished (check exit_code)
+  killed_by_timeout  Auto-killed after --timeout expired (exit_code 124)
+  lost               Task died abnormally before landing exit_code
+
+stdout JSON (single task or array):
+  {"task_id": "t_9x82f1", "pid": 412, "state": "running", "uptime_sec": 42, "started_at": "...", "cmd": "..."}
+
+Examples:
+  kros shell jobs                     # list all tasks
+  kros shell jobs t_9x82f1            # single task detail
+  kros shell jobs --state running     # only running tasks""",
+    },
+    {
+        "name": "kros shell logs <task_id>",
+        "summary": "Tail stdout/stderr of a spawned task (default: last 80 lines).",
+        "body": """\
+Designed for "last words" debugging: the tail is usually enough to identify
+a failure without burning tokens on megabytes of log output.
+
+Key flags:
+  --tail/-n <int>  Lines from end per stream (default 80)
+  --full           Dump entire stdout/stderr (use sparingly)
+
+stdout JSON:
+  {"task_id": "t_9x82f1", "state": "exited", "exit_code": 1, "stdout_tail": "...", "stderr_tail": "..."}
+
+Important: accepts task_id (t_xxx), NOT a raw PID.
+
+Examples:
+  kros shell logs t_9x82f1
+  kros shell logs t_9x82f1 --tail 200
+  kros shell logs t_9x82f1 --full""",
+    },
+    {
+        "name": "kros shell kill <task_id>",
+        "summary": "Signal a spawned task (default SIGTERM). Refuses raw PIDs.",
+        "body": """\
+Signals the entire process group (wrapper + user command + grandchildren).
+To kill a system process by PID, use `kros shell run 'kill <pid>'` instead.
+
+Key flags:
+  --signal/-s <name>  TERM (default) / KILL / INT
+
+stdout JSON:
+  {"task_id": "t_9x82f1", "killed": true, "signal": "SIGTERM"}
+  {"task_id": "t_9x82f1", "killed": false, "reason": "already_exited"}
+
+Important: only accepts task_id (t_xxx). Raw PIDs are rejected with guidance.
+
+Examples:
+  kros shell kill t_9x82f1
+  kros shell kill t_9x82f1 --signal KILL""",
+    },
+    {
         "name": "kros file read <src>",
         "summary": "Read any document into LLM-ready Markdown. Supports PDF, Word, Excel, HTML, images (OCR), and more.",
         "body": """\
