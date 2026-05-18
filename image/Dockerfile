@@ -11,8 +11,16 @@
 #   /workspace              Default CWD; mount a host dir here for I/O.
 #
 # Build:
-#   docker build -t kros:dev ./image
-#   docker build -t kros:dev --build-arg LIGHTPANDA_VERSION=nightly ./image
+#   ./image/build.sh                                # recommended; handles host-side lightpanda cache
+#   ./image/build.sh v0.1.0                         # build kros:v0.1.0
+#   LIGHTPANDA_VERSION=nightly ./image/build.sh     # pin a specific lightpanda release
+#
+# NOTE: this Dockerfile expects `.cache/lightpanda` to already exist in the
+# build context. build.sh fetches it on the host (where HTTP(S)_PROXY works);
+# `docker build` itself no longer reaches GitHub. If you must invoke
+# `docker build` directly, fetch the binary yourself first:
+#   curl -fL -o image/.cache/lightpanda \
+#     https://github.com/lightpanda-io/browser/releases/download/nightly/lightpanda-x86_64-linux
 
 ARG PYTHON_VERSION=3.12
 ARG LIGHTPANDA_VERSION=nightly
@@ -81,11 +89,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         tini \
     && rm -rf /var/lib/apt/lists/*
 
-# Pull lightpanda binary from GitHub release. Only amd64 is published.
+# Pull lightpanda binary, pre-fetched on the host by build.sh into
+# `.cache/lightpanda` (see top-of-file note). We COPY instead of curl-ing
+# from inside the build because `docker build` doesn't inherit the host's
+# HTTP(S)_PROXY env, and GitHub releases over the bare network can be
+# unreasonably slow / unreachable.
 ARG LIGHTPANDA_VERSION
-RUN curl -fsSL -o /usr/local/bin/lightpanda \
-        "https://github.com/lightpanda-io/browser/releases/download/${LIGHTPANDA_VERSION}/lightpanda-x86_64-linux" \
-    && chmod +x /usr/local/bin/lightpanda
+COPY .cache/lightpanda /usr/local/bin/lightpanda
+RUN chmod +x /usr/local/bin/lightpanda
 
 # Bring the fully-populated venv over in one layer.
 COPY --from=builder /app/.venv /app/.venv
