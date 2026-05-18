@@ -15,7 +15,7 @@
 
 set -eo pipefail
 
-DEFAULT_IMAGE="zeitro/kros:latest"
+DEFAULT_IMAGE="kros/kros:latest"
 
 print_usage() {
     cat <<'EOF'
@@ -29,7 +29,7 @@ ARGUMENTS:
                       mounted into the container (at /entrypoint).
 
 OPTIONS:
-  --image TAG         Kros image to use (default: zeitro/kros:latest)
+  --image TAG         Kros image to use (default: kros/kros:latest)
   -v HOST:CTR[:opts]  Mount additional host path into the container (repeatable)
   -e KEY[=VAL]        Pass an environment variable (repeatable)
   -h, --help          Show this help
@@ -42,7 +42,7 @@ EXAMPLES:
   kros run ./bootstrap.sh -v ./my-agent:/work -e OPENAI_API_KEY
 
   # Pin a specific image version
-  kros run ./bootstrap.sh --image zeitro/kros:0.1.0
+  kros run ./bootstrap.sh --image kros/kros:0.1.0
 
   # Pass arguments through to the script itself
   kros run ./bootstrap.sh -- --my-flag foo bar
