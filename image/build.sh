@@ -6,6 +6,9 @@
 #   ./build.sh v0.1.0               # build kros:v0.1.0
 #   TAG=foo ./build.sh              # build kros:foo
 #   IMAGE=kros/kros ./build.sh      # build kros/kros:dev
+#   ./build.sh --no-cache           # bypass docker build cache (force fresh layers)
+#   ./build.sh --no-cache v0.1.0    # combine with a tag
+#   NOCACHE=1 ./build.sh            # same as --no-cache, env style
 #
 # Requirements: a working Docker daemon. Nothing else.
 
@@ -13,6 +16,27 @@ set -euo pipefail
 
 # Resolve script dir so the script works no matter where it's invoked from.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# --- parse flags (must run before reading $1 as TAG) ---
+NO_CACHE_FLAG=""
+# Filter out --no-cache from positional args; everything else stays in place.
+_positional=()
+for arg in "$@"; do
+    case "$arg" in
+        --no-cache)
+            NO_CACHE_FLAG="--no-cache"
+            ;;
+        *)
+            _positional+=("$arg")
+            ;;
+    esac
+done
+set -- "${_positional[@]}"
+
+# Also honor `NOCACHE=1 ./build.sh` style (anything truthy enables it).
+case "${NOCACHE:-0}" in
+    1|true|TRUE|yes|YES) NO_CACHE_FLAG="--no-cache" ;;
+esac
 
 # --- knobs (override via env or first positional argument) ---
 IMAGE="${IMAGE:-kros}"
@@ -80,9 +104,13 @@ echo
 # --- build ---
 echo "==> Building ${FULL_TAG}  (platform=${PLATFORM})"
 echo "    context: ${SCRIPT_DIR}"
+if [[ -n "${NO_CACHE_FLAG}" ]]; then
+    echo "    cache:   disabled (--no-cache)"
+fi
 echo
 
 docker build \
+    ${NO_CACHE_FLAG} \
     --platform "${PLATFORM}" \
     --build-arg "LIGHTPANDA_VERSION=${LIGHTPANDA_VERSION}" \
     -t "${FULL_TAG}" \
