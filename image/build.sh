@@ -95,4 +95,4 @@ docker images --filter="reference=${FULL_TAG}" \
 
 echo
 echo "Try it:"
-echo "    docker run --rm ${FULL_TAG} kros caps | head -20"
+echo "    docker run --rm ${FULL_TAG} caps | head -20"
